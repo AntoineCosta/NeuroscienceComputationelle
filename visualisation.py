@@ -280,11 +280,13 @@ class LiveTopView:
     Live top-view window (manual control). Key events of the window are forwarded to
     on_press(key) / on_release(key). The view keeps a fixed scale and re-centres on
     the robot when it gets close to the edge.
+    Legs: the 6 drawn legs of the body, coloured by tripod (blue = A, red = B);
+    filled foot = on the ground, hollow foot = raised.
     Blitting: the axes background is rendered once (and on resize / re-centring),
     only the moving artists are redrawn at each frame.
     """
 
-    def __init__(self, body, on_press, on_release, half_size=1.0,
+    def __init__(self, body, on_press, on_release, half_size=0.75,
                  title='Arrows: drive | Esc or close: quit'):
         # free the arrow keys from matplotlib's default shortcuts (back / forward)
         for name, key in (('keymap.back', 'left'), ('keymap.forward', 'right')):
@@ -302,13 +304,20 @@ class LiveTopView:
         self.ax.set_xlabel('x (m)')
         self.ax.set_ylabel('y (m)')
         self.ax.set_title(title)
-        self.trail, = self.ax.plot([], [], color='tab:blue', linewidth=1.5, zorder=3,
+        self.trail, = self.ax.plot([], [], color='grey', linewidth=1.5, zorder=2,
                                    animated=True)
         self.shape = self.ax.add_patch(Polygon(body.outline(body.pose), closed=True,
                                                facecolor='tab:orange', edgecolor='black',
-                                               alpha=0.6, zorder=2, animated=True))
+                                               alpha=0.6, zorder=3, animated=True))
+        self.leg_colors = ['blue' if leg.phase == 0 else 'red' for leg in body.shown]
+        self.leg_lines = [self.ax.plot([], [], color=c, linewidth=2, zorder=4, animated=True)[0]
+                          for c in self.leg_colors]
+        self.foot_marks = [self.ax.plot([], [], 'o', color=c, markersize=7, zorder=5,
+                                        animated=True)[0] for c in self.leg_colors]
         self.label = self.ax.text(0.02, 0.98, '', transform=self.ax.transAxes, va='top',
                                   family='monospace', animated=True)
+        self.ax.text(0.02, 0.02, 'tripod A blue, B red | filled foot: on the ground, '
+                     'hollow: raised', transform=self.ax.transAxes, fontsize=8)
         self.background = None
         canvas = self.fig.canvas
         canvas.mpl_connect('draw_event', self._on_full_draw)
@@ -322,7 +331,7 @@ class LiveTopView:
         self._draw_moving()
 
     def _draw_moving(self):
-        for artist in (self.trail, self.shape, self.label):
+        for artist in (self.trail, self.shape, *self.leg_lines, *self.foot_marks, self.label):
             self.fig.draw_artist(artist)
 
     def _set_limits(self):
@@ -336,8 +345,11 @@ class LiveTopView:
     def close(self):
         plt.close(self.fig)
 
-    def draw(self, pose, t_ms, speed, steer):
-        """Update and redraw the body, trail and text."""
+    def draw(self, pose, t_ms, speed, steer, feet):
+        """
+        Update and redraw the body, legs, trail and text.
+        feet: (hips, feet, raised) from Body.feet().
+        """
         if np.max(np.abs(pose[:2] - self.centre)) > 0.8 * self.half_size:
             self.centre = pose[:2].copy()
             self._set_limits()
@@ -346,7 +358,12 @@ class LiveTopView:
         xy = np.array(self.trail_xy)
         self.trail.set_data(xy[:, 0], xy[:, 1])
         self.shape.set_xy(self.body.outline(pose))
-        mode = 'stop' if speed == 0 and steer == 0 else 'spin' if speed == 0 else 'walk'
+        for line, mark, color, hip, foot, up in zip(self.leg_lines, self.foot_marks,
+                                                    self.leg_colors, *feet):
+            line.set_data([hip[0], foot[0]], [hip[1], foot[1]])
+            mark.set_data([foot[0]], [foot[1]])
+            mark.set_markerfacecolor('white' if up else color)
+        mode ='stop' if speed == 0 and steer == 0 else 'spin' if speed == 0 else 'walk'
         self.label.set_text(f"t = {t_ms / 1000:6.2f} s\n{mode}\nspeed {speed:+.2f}\n"
                             f"steer {steer:+.2f}")
         canvas = self.fig.canvas

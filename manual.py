@@ -105,7 +105,7 @@ class Gamepad(Keyboard):
         return super().command(t)
 
 
-def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=1.0,
+def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=0.75,
                max_duration=3600 * second, keys=None):
     """
     Live manual control in (approximately) real time, in a matplotlib window.
@@ -173,7 +173,8 @@ def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=1
         odometry(t_ms)
         a = np.clip((t_ms - times[-1]) / half_ms, 0, 1)
         start = poses[-2] if len(poses) > 1 else poses[-1]
-        view.draw(start + a * (poses[-1] - start), t_ms, *keys.command(t))
+        pose = start + a * (poses[-1] - start)
+        view.draw(pose, t_ms, *keys.command(t), body.feet(pose, t_ms - times[-1]))
 
         now = time.perf_counter()
         if wall_start is None or wall_start + t_ms / 1000 < now - 0.2:
