@@ -8,12 +8,14 @@ Modules:
   intermediates.py  6 graded inhibitory interneurons between the brain and the legs
   brain.py          the 'brain': regular code turning commands into intermediate inputs
   body.py           top-view body pose, moved by the stance legs (differential drive)
-  manual.py         live manual control with the arrow keys (run: python manual.py)
+  manual.py         live manual control: game controller or arrow keys (python manual.py)
   visualisation.py  all plots
 
 TODO (project roadmap)
 - Leg position (x, z) computed from motor spikes (the swing mirrors the stance).
-- Manual input: game controller (keyboard arrows done in manual.py).
+- Faster CPG to cut the command latency (a command waits up to half a period for the
+  next CPG spike). Constraints: TAU_M <= period / 20, EXC_DELAY + LIFT_DELAY < period / 2,
+  STRIDE per half-cycle (walking speed doubles if the period halves).
 - Sensor neurons exciting the intermediates (`sensor` input) to brake or turn away
   from obstacles, whatever the brain commands.
 """

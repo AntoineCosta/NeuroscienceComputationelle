@@ -1,4 +1,5 @@
-"""Manual control: drive the hexapod live with the arrow keys (top view)."""
+"""Manual control: drive the hexapod live with a game controller or the arrow keys (top view)."""
+import os
 import time
 import numpy as np
 from brian2 import Network, SpikeMonitor, network_operation, ms, second
@@ -14,6 +15,11 @@ import visualisation as vis
 KEY_SPEED = 1.0   # up / down: walking speed
 KEY_STEER = 0.5   # + left / right while walking: that side's stroke halved (curve)
 KEY_SPIN = 1.0    # left / right alone: turn on the spot
+STICK_DEADZONE = 0.15    # controller stick values below this are ignored
+PAD_MAX_STEER = 0.8      # full right stick: inner legs keep 20 % (tight turn, no pivot)
+PAD_SPEED_AXIS = 1       # left stick vertical (up = negative)
+PAD_STEER_AXIS = 2       # right stick horizontal
+PAD_QUIT_BUTTON = 7      # Start button (Xbox layout, SDL numbering)
 
 
 class Keyboard:
@@ -44,58 +50,127 @@ class Keyboard:
         return 0.0, side * self.spin           # speed 0 + steer = turn on the spot
 
 
+class Gamepad(Keyboard):
+    """
+    Game controller (Xbox layout, read with pygame); the keyboard stays active.
+      left stick up / down      speed (proportional)
+      right stick left / right  steer while walking (proportional, up to PAD_MAX_STEER)
+      D-pad left / right        turn on the spot
+    Separate sticks: 100 % speed and 100 % steer at the same time.
+      Start                     quit
+    The controller wins while it is used (stick out of the dead zone or D-pad
+    pressed), otherwise the keyboard command applies. Plugging / unplugging the
+    controller while running is handled.
+    """
+
+    def __init__(self, deadzone=STICK_DEADZONE, **kwargs):
+        super().__init__(**kwargs)
+        os.environ.setdefault('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', '1')  # no pygame window
+        os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
+        import pygame
+        self.pygame = pygame
+        pygame.init()                  # event queue only, no window is opened
+        pygame.joystick.init()
+        self.deadzone = deadzone
+        self.pad = None
+
+    def _poll(self):
+        """Process controller events: (dis)connection and the quit button."""
+        pg = self.pygame
+        for event in pg.event.get():
+            if event.type == pg.JOYDEVICEADDED and self.pad is None:
+                self.pad = pg.joystick.Joystick(event.device_index)
+                print(f"Controller connected: {self.pad.get_name()}")
+            elif (event.type == pg.JOYDEVICEREMOVED and self.pad is not None
+                  and event.instance_id == self.pad.get_instance_id()):
+                self.pad = None
+                print("Controller disconnected (keyboard still active)")
+            elif event.type == pg.JOYBUTTONDOWN and event.button == PAD_QUIT_BUTTON:
+                self.quit = True
+
+    def _axis(self, k):
+        """Stick axis with dead zone, rescaled so it still reaches 1."""
+        v = float(np.clip(self.pad.get_axis(k), -1, 1))
+        return 0.0 if abs(v) < self.deadzone else np.sign(v) * (abs(v) - self.deadzone) / (1 - self.deadzone)
+
+    def command(self, t=None):
+        self._poll()
+        if self.pad is not None:
+            dpad_x = self.pad.get_hat(0)[0] if self.pad.get_numhats() else 0
+            if dpad_x:
+                return 0.0, dpad_x * self.spin
+            speed = -self._axis(PAD_SPEED_AXIS)    # stick up = negative axis value
+            if speed:                              # steer alone would spin: walking only
+                return speed, PAD_MAX_STEER * self._axis(PAD_STEER_AXIS)
+        return super().command(t)
+
+
 def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=1.0,
                max_duration=3600 * second, keys=None):
     """
-    Live manual control in (approximately) real time, in a matplotlib window:
+    Live manual control in (approximately) real time, in a matplotlib window.
+    Game controller (if pygame is installed, see Gamepad) and keyboard:
       up / down                  walk forward / backward
       up / down + left / right   walk while turning towards that side
       left / right alone         turn on the spot
       Esc or close the window    quit
-    The window needs the keyboard focus (click on it once).
+    The window needs the keyboard focus for the keys (click on it once).
 
     Commands are latched at each CPG half-cycle (as in the scripted tests). The body
-    moves by one stance push per half-cycle, known once its spikes are in, and shown
-    during the following half-cycle: about 1/4 to 1/2 s between key and motion.
-    Returns (times in ms, poses) at the end of every half-cycle.
-    keys: command source (default: a new Keyboard); anything with press(key),
-          release(key), command(t) and a `quit` flag.
+    moves by one stance push per half-cycle, computed as soon as its spikes are in
+    (exc_delay + lift_delay after the CPG spike) and shown during that same
+    half-cycle: 0 to 1/4 s between key and motion (next CPG spike).
+    Returns (times, poses): CPG spike time (ms) of each push and the pose after it
+    (first entry: start pose).
+    keys: command source (default: Gamepad, or Keyboard if pygame is missing);
+          anything with press(key), release(key), command(t) and a `quit` flag.
     """
+    if keys is None:
+        try:
+            keys = Gamepad()
+        except ImportError:
+            print("pygame not installed: keyboard only.")
+            keys = Keyboard()
     cpg = CPG(period=config.CYCLE_PERIOD)
     legs = LegSet(cpg, n_legs=n_legs, n_motor=n_motor)
     layer = IntermediateLayer(cpg, legs)
     brain = Brain(layer)
     body = Body(legs)
-    keys = Keyboard() if keys is None else keys
     view = vis.LiveTopView(body, keys.press, keys.release, half_size=view_size)
 
     mon_cpg = SpikeMonitor(cpg.neurons)
     mon_motor = SpikeMonitor(legs.motors)
     half_ms = float(cpg.period / 2 / ms)
+    # all motor spikes caused by a CPG spike are in after this time (R is the last one)
+    settle_ms = float((legs.exc_delay + legs.lift_delay) / ms) + 1
     times, poses = [0.0], [body.pose.copy()]
     n_seen = 0             # motor spikes already used by the odometry
+    n_cpg_seen = 0         # CPG spikes (half-cycles) already used by the odometry
     wall_start = None      # wall-clock time of simulation time 0
 
-    @network_operation(dt=cpg.period / 2, when='start')
-    def odometry(t):
-        """At each half-cycle start: move the body by the half-cycle that just ended."""
-        nonlocal n_seen
-        if mon_cpg.num_spikes == 0:
+    def odometry(t_ms):
+        """Move the body by the latest half-cycle, once all its motor spikes are in."""
+        nonlocal n_seen, n_cpg_seen
+        if mon_cpg.num_spikes == n_cpg_seen:
+            return
+        t_cpg = float(np.asarray(mon_cpg.t / ms)[-1])
+        if t_ms < t_cpg + settle_ms:
             return
         phase = int(np.asarray(mon_cpg.i[:])[-1])
         body.step(legs.spike_counts(mon_motor.i[n_seen:]), phase)
-        n_seen = mon_motor.num_spikes
-        times.append(float(t / ms))
+        n_seen, n_cpg_seen = mon_motor.num_spikes, mon_cpg.num_spikes
+        times.append(t_cpg)
         poses.append(body.pose.copy())
 
     @network_operation(dt=1000 / fps * ms, when='end')
     def display(t):
-        """Draw the body (one half-cycle behind, interpolated) and keep real time."""
+        """Update the odometry, draw the body (push spread over its half-cycle), keep real time."""
         nonlocal wall_start
         if keys.quit or not view.is_open:
             net.stop()
             return
         t_ms = float(t / ms)
+        odometry(t_ms)
         a = np.clip((t_ms - times[-1]) / half_ms, 0, 1)
         start = poses[-2] if len(poses) > 1 else poses[-1]
         view.draw(start + a * (poses[-1] - start), t_ms, *keys.command(t))
@@ -106,14 +181,15 @@ def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=1
         view.wait(wall_start + t_ms / 1000 - now)
 
     net = Network(*cpg.objects, *legs.objects, *layer.objects, brain.driver(keys.command),
-                  odometry, display, mon_cpg, mon_motor)
-    print("Manual control: arrows to drive, Esc or close the window to quit "
-          "(click on the window first).")
+                  display, mon_cpg, mon_motor)
+    print("Manual control: left stick speed + right stick steer (or arrows), D-pad or arrows "
+          "alone to turn on the spot, Start / Esc / close the window to quit "
+          "(click on the window for the keys).")
     net.run(max_duration)
     if view.is_open:
         view.close()
     x, y, heading = body.pose
-    print(f"Stopped at t={times[-1] / 1000:.2f} s: x={x:+.3f} m, y={y:+.3f} m, "
+    print(f"Stopped at t={float(net.t / second):.2f} s: x={x:+.3f} m, y={y:+.3f} m, "
           f"heading={np.degrees(heading):.1f} deg")
     return np.array(times), np.array(poses)
 
