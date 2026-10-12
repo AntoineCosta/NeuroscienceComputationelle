@@ -42,7 +42,7 @@ class LegSet:
 
     Motor neuron: LIF (v relative to rest), thresholds evenly spaced:
         theta_k = (k + 1/2) * u     (R and D: theta_0)
-    Each CPG spike gives a single EPSP of N*u to its targets, so without inhibition
+    Each CPG spike gives a single EPSP of N*u to its F/B targets, so without inhibition
     all N neurons of a group fire (once, all together). An inhibitory spike arriving
     just before lowers v by m*u at the EPSP time: only the N - m lowest thresholds
     are reached. The inhibitory weight is given by inhibition_weight(m).
@@ -50,7 +50,9 @@ class LegSet:
     CPG wiring, for a leg whose stance is CPG phase p:
       - D (lower) <- CPG p (stance onset)
       - R (raise) <- CPG 1-p (swing onset), delayed by lift_delay
-      - F and B   <- both CPG neurons (direction selected by descending inhibition)
+      - F and B   <- both CPG neurons (direction selected by the intermediate layer)
+    R and D get an EPSP of 2N*u: they are braked by both direction intermediates
+    (forward and reverse), so they step as soon as either direction has some speed.
     """
 
     def __init__(self, cpg, n_legs=N_LEGS, n_motor=N_MOTOR, tau_m=TAU_M,
@@ -79,6 +81,7 @@ class LegSet:
         rank = np.array([0, 0] + list(range(n)) * 2)
         v_th = np.concatenate([[theta[0], theta[0]], theta, theta])
         legs_phase = np.array([(i % (n_legs // 2) + i // (n_legs // 2)) % 2 for i in range(n_legs)])
+        legs_side = np.array([i // (n_legs // 2) for i in range(n_legs)])
 
         self.eqs = '''
         dv/dt = -v / tau_m : volt (unless refractory)
@@ -86,6 +89,7 @@ class LegSet:
         kind : integer (constant)
         rank : integer (constant)
         leg : integer (constant)
+        side : integer (constant)   # 0 = left, 1 = right
         phase : integer (constant)  # CPG neuron driving this leg's stance
         '''
         self.motors = NeuronGroup(n_legs * block, model=self.eqs, threshold='v > v_th',
@@ -95,18 +99,22 @@ class LegSet:
         self.motors.rank = np.tile(rank, n_legs)
         self.motors.v_th = np.tile(v_th, n_legs) * volt
         self.motors.leg = np.repeat(np.arange(n_legs), block)
+        self.motors.side = np.repeat(legs_side, block)
         self.motors.phase = np.repeat(legs_phase, block)
 
         self.legs = [Leg(self.motors, i, n, n_legs) for i in range(n_legs)]
 
-        # --- CPG excitation: one EPSP of N*u per CPG spike ------------------------
+        # --- CPG excitation: one EPSP of N*u (F/B) or 2N*u (R/D) per CPG spike ------
         # v leaks for one step between the synaptic jump and the threshold test:
-        # the weight compensates it so v = N*u exactly when tested.
-        self.excitation = Synapses(cpg.neurons, self.motors, on_pre='v_post += w_exc',
-                                   namespace={'w_exc': n * u * np.exp(float(defaultclock.dt / tau_m))})
+        # the weight compensates it so v = N*u (2N*u) exactly when tested.
+        self.excitation = Synapses(cpg.neurons, self.motors, model='w : volt (constant)',
+                                   on_pre='v_post += w')
         self.excitation.connect(condition=f'kind_post >= {FORWARD} '
                                           f'or (kind_post == {LOWER} and i == phase_post) '
                                           f'or (kind_post == {RAISE} and i != phase_post)')
+        is_fb = np.asarray(self.motors.kind[:])[np.asarray(self.excitation.j[:])] >= FORWARD
+        self.excitation.w = (np.where(is_fb, n, 2 * n) * float(u / volt)
+                             * np.exp(float(defaultclock.dt / tau_m))) * volt
         self.excitation.delay = self.input_delay(self.excitation, exc_delay)
 
     @property
@@ -122,14 +130,24 @@ class LegSet:
 
     def inhibition_weight(self, m, lead=None):
         """
-        Weight of ONE inhibitory spike silencing the m highest thresholds of a group
-        (m may be fractional; m = N silences everything, R/D included).
-        lead: time between the inhibitory spike's arrival and the CPG EPSP
-        (default: exc_delay, i.e. inhibition arriving at the CPG spike time).
+        Weight of ONE spike shifting a group's potential by m threshold steps at the
+        CPG EPSP time: as an inhibition it silences the m highest thresholds (m = N
+        silences everything, R/D included); as an excitation it cancels m steps of
+        inhibition. m may be fractional (recruitment rounds to the nearest step).
+        lead: time between the spike's arrival and the CPG EPSP
+        (default: exc_delay, i.e. arriving at the CPG spike time).
         """
         lead = self.exc_delay if lead is None else lead
         # decays during `lead`, plus the one step before the threshold test
         return m * self.u * np.exp(float((lead + defaultclock.dt) / self.tau_m))
+
+    def spike_counts(self, indices):
+        """[leg, kind] number of spikes of the given motor neuron indices (live use)."""
+        indices = np.asarray(indices, dtype=int)
+        counts = np.zeros((self.n_legs, 4), dtype=int)
+        np.add.at(counts, (np.asarray(self.motors.leg[:])[indices],
+                           np.asarray(self.motors.kind[:])[indices]), 1)
+        return counts
 
     def recruitment(self, mon_cpg, mon_motor):
         """

@@ -5,16 +5,17 @@ Modules:
   config.py         global parameters (legs, neurons per group, rhythm, delays, dt)
   CPG.py            rhythm generator (one spike per half-cycle)
   legs.py           leg motor neurons (R, D, F, B groups)
+  intermediates.py  6 graded inhibitory interneurons between the brain and the legs
+  brain.py          the 'brain': regular code turning commands into intermediate inputs
+  body.py           top-view body pose, moved by the stance legs (differential drive)
+  manual.py         live manual control with the arrow keys (run: python manual.py)
   visualisation.py  all plots
 
 TODO (project roadmap)
-- Descending neurons (Fwd-L/R, Rev-L/R, L, R): one inhibitory spike per half-cycle,
-  triggered by the CPG spike, weight = LegSet.inhibition_weight(m) to silence m neurons.
-  Tonically active interneurons: no command = everything inhibited = stand still.
-  Inhibition onto R must be delayed by LIFT_DELAY (like R's excitation).
-- Leg position (x, z) computed from motor spikes.
-- Manual input: scripted timeline, then keyboard / controller.
-- Sensor neurons hijacking descending commands for obstacle avoidance.
+- Leg position (x, z) computed from motor spikes (the swing mirrors the stance).
+- Manual input: game controller (keyboard arrows done in manual.py).
+- Sensor neurons exciting the intermediates (`sensor` input) to brake or turn away
+  from obstacles, whatever the brain commands.
 """
 import numpy as np
 from brian2 import Network, SpikeMonitor, StateMonitor, Synapses, defaultclock, ms
@@ -22,6 +23,9 @@ from brian2 import Network, SpikeMonitor, StateMonitor, Synapses, defaultclock, 
 import config
 from CPG import CPG
 from legs import LegSet, RAISE, LOWER, FORWARD, BACKWARD, KIND_NAMES
+from intermediates import IntermediateLayer
+from brain import Brain
+from body import Body
 import visualisation as vis
 
 
@@ -48,7 +52,7 @@ def test_cpg(n_cycles=4, filename="cpg_test.png", show=True):
 def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
               inhibition=None, n_cycles=4, show_legs=None, filename="legs_test.png", show=True):
     """
-    CPG + legs with a fake test inhibition standing in for the descending neurons:
+    CPG + legs with a fake test inhibition standing in for the intermediate layer:
     one inhibitory spike per CPG spike, delivered at the CPG spike time (exc_delay
     before the EPSP), with weight legs.inhibition_weight(m).
 
@@ -113,6 +117,123 @@ def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
     return counts
 
 
+DEFAULT_TIMELINE = [  # (start time, speed, steer)
+    (0 * ms, 1.0, 0.0),       # forward 100 %
+    (1000 * ms, 0.5, 0.0),    # forward 50 %
+    (2000 * ms, 1.0, -0.5),   # forward 100 %, steer left 50 % -> left legs 50 %
+    (3000 * ms, 0.5, 0.4),    # forward 50 %, steer right 40 % -> right legs 30 %
+    (4000 * ms, 0.0, 0.0),    # stop
+    (5000 * ms, -0.7, 0.0),   # reverse 70 %
+    (6000 * ms, 0.0, -1.0),   # turn left on the spot, 100 %
+    (7000 * ms, -1.0, 0.5),   # reverse 100 %, steer right 50 %
+]
+
+
+def timeline_command(timeline):
+    """command_fn(t) -> (speed, steer) from a list of (start time, speed, steer)."""
+    def command_fn(t):
+        speed, steer = 0.0, 0.0
+        for t_start, sp, st in timeline:
+            if t >= t_start:
+                speed, steer = sp, st
+        return speed, steer
+    return command_fn
+
+
+def expected_recruitment(n, speed, steer, leg, in_stance):
+    """
+    Expected number of fired neurons [R, D, F, B] of a leg in one half-cycle.
+    Walking: stroke = |speed| * (1 - steer of the leg's side) * N for the push (stance)
+    and the return (swing); R/D step as soon as |speed| * N > 1/2.
+    Speed 0: turn on the spot, stroke |steer| * N, the side towards the turn in reverse.
+    """
+    speed = float(np.clip(speed, -1, 1))
+    steer = float(np.clip(steer, -1, 1))
+    if speed != 0:
+        side_steer = max(0.0, -steer) if leg.side == 0 else max(0.0, steer)
+        side_speed, drive = speed * (1 - side_steer), abs(speed)
+    else:
+        side_speed, drive = (steer if leg.side == 0 else -steer), abs(steer)
+    stroke = int(np.sum(np.arange(n) + 0.5 < abs(side_speed) * n - 1e-9))
+    steps = int(drive * n > 0.5 + 1e-9)
+    direction = 0 if side_speed >= 0 else 1
+    out = np.zeros(4, dtype=int)
+    if in_stance:
+        out[LOWER] = steps
+        out[FORWARD + direction] = stroke          # push: F forward, B reverse
+    else:
+        out[RAISE] = steps
+        out[FORWARD + 1 - direction] = stroke      # return: B forward, F reverse
+    return out
+
+
+def test_control(timeline=DEFAULT_TIMELINE, n_legs=config.N_LEGS, n_motor=config.N_MOTOR,
+                 duration=8000 * ms, show_legs=None, filename="control_test.png", show=True):
+    """
+    CPG + legs + intermediate layer + brain, driven by a scripted command timeline.
+    Checks the number of R, D, F, B neurons fired by every leg in every half-cycle.
+    Returns (legs, on_t, on_p, counts) as in LegSet.recruitment().
+    """
+    cpg = CPG(period=config.CYCLE_PERIOD)
+    legs = LegSet(cpg, n_legs=n_legs, n_motor=n_motor)
+    layer = IntermediateLayer(cpg, legs)
+    brain = Brain(layer)
+    command_fn = timeline_command(timeline)
+
+    mon_cpg = SpikeMonitor(cpg.neurons)
+    mon_level = StateMonitor(layer.neurons, 'level', record=True)
+    mon_motor = SpikeMonitor(legs.motors)
+    # margin so the last half-cycle (and its delayed R spike) is complete
+    run_time = duration + legs.exc_delay + legs.lift_delay + 2 * defaultclock.dt
+    net = Network(*cpg.objects, *legs.objects, *layer.objects, brain.driver(command_fn),
+                  mon_cpg, mon_level, mon_motor)
+    print(f"Running CPG + {n_legs} legs + intermediate layer for {duration}")
+    net.run(run_time)
+
+    # --- Checks ---------------------------------------------------------------
+    on_t, on_p, counts, _ = legs.recruitment(mon_cpg, mon_motor)
+    n_errors = 0
+    for c, (t, p) in enumerate(zip(on_t, on_p)):
+        speed, steer = command_fn(t * ms)
+        for leg in legs.legs:
+            expected = expected_recruitment(n_motor, speed, steer, leg, in_stance=(p == leg.phase))
+            got = counts[c, leg.index]
+            if not np.array_equal(got, expected):
+                n_errors += 1
+                print(f"  t={t:.0f} ms {leg.name}: got R,D,F,B={got.tolist()}, "
+                      f"expected {expected.tolist()} (speed={speed}, steer={steer})")
+    print(f"{len(on_t)} half-cycles x {n_legs} legs checked: "
+          + ("all checks passed." if n_errors == 0 else f"{n_errors} FAILED."))
+
+    vis.plot_control(layer, mon_cpg, mon_level, mon_motor, command_fn, counts, run_time,
+                     show_legs=show_legs, filename=filename, show=show)
+    return legs, on_t, on_p, counts
+
+
+def test_body(timeline=DEFAULT_TIMELINE, duration=8000 * ms, animate=True, show=True):
+    """Full chain (test_control), then the top view of the body moved by its stance legs."""
+    legs, on_t, on_p, counts = test_control(timeline, duration=duration, show=False)
+    body = Body(legs)
+    times, poses = body.trajectory(on_t, on_p, counts)
+    command_fn = timeline_command(timeline)
+
+    print("Pose at each command change (x, y in m, heading in deg, 90 = start):")
+    for t_start, speed, steer in timeline:
+        k = np.searchsorted(times, float(t_start / ms))
+        x, y, h = poses[k]
+        print(f"  {float(t_start / ms):6.0f} ms  speed {speed:+.1f} steer {steer:+.1f} -> "
+              f"x={x:+.3f} y={y:+.3f} heading={np.degrees(h):6.1f}")
+    x, y, h = poses[-1]
+    print(f"  end {times[-1]:6.0f} ms -> x={x:+.3f} y={y:+.3f} heading={np.degrees(h):6.1f}")
+
+    vis.plot_trajectory(body, times, poses, command_fn, show=show and not animate)
+    if animate:
+        vis.animate_body(body, times, poses, command_fn, show=show)
+    return times, poses
+
+
 if __name__ == '__main__':
     # test_cpg()
-    test_legs()
+    # test_legs()
+    # test_control()
+    test_body()
