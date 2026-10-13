@@ -8,16 +8,18 @@ Modules:
   intermediates.py  6 graded inhibitory interneurons between the brain and the legs
   brain.py          the 'brain': regular code turning commands into intermediate inputs
   body.py           top-view body pose, moved by the stance legs (differential drive)
+  world.py          arena walls and static rectangular obstacles
+  sensors.py        4 graded distance sensors (reflexes on the intermediates)
+  robot.py          the closed loop: network + body + world + sensors
   manual.py         live manual control: game controller or arrow keys (python manual.py)
   visualisation.py  all plots
 
 TODO (project roadmap)
-- Leg position (x, z) computed from motor spikes (the swing mirrors the stance).
 - Faster CPG to cut the command latency (a command waits up to half a period for the
   next CPG spike). Constraints: TAU_M <= period / 20, EXC_DELAY + LIFT_DELAY < period / 2,
   STRIDE per half-cycle (walking speed doubles if the period halves).
-- Sensor neurons exciting the intermediates (`sensor` input) to brake or turn away
-  from obstacles, whatever the brain commands.
+- Steering is not direction-aware: during a back-off, the turn-away brake swings the
+  nose back towards the obstacle (accepted for now).
 """
 import numpy as np
 from brian2 import Network, SpikeMonitor, StateMonitor, Synapses, defaultclock, ms
@@ -28,6 +30,8 @@ from legs import LegSet, RAISE, LOWER, FORWARD, BACKWARD, KIND_NAMES
 from intermediates import IntermediateLayer
 from brain import Brain
 from body import Body
+from robot import Robot
+from world import World
 import visualisation as vis
 
 
@@ -146,7 +150,8 @@ def expected_recruitment(n, speed, steer, leg, in_stance):
     """
     Expected number of fired neurons [R, D, F, B] of a leg in one half-cycle.
     Walking: stroke = |speed| * (1 - steer of the leg's side) * N for the push (stance)
-    and the return (swing); R/D step as soon as |speed| * N > 1/2.
+    and the return (swing); R lifts as soon as |speed| * N > 1/2; D fires at every
+    stance onset (never braked).
     Speed 0: turn on the spot, stroke |steer| * N, the side towards the turn in reverse.
     """
     speed = float(np.clip(speed, -1, 1))
@@ -161,7 +166,7 @@ def expected_recruitment(n, speed, steer, leg, in_stance):
     direction = 0 if side_speed >= 0 else 1
     out = np.zeros(4, dtype=int)
     if in_stance:
-        out[LOWER] = steps
+        out[LOWER] = 1
         out[FORWARD + direction] = stroke          # push: F forward, B reverse
     else:
         out[RAISE] = steps
@@ -216,7 +221,7 @@ def test_body(timeline=DEFAULT_TIMELINE, duration=8000 * ms, animate=True, show=
     """Full chain (test_control), then the top view of the body moved by its stance legs."""
     legs, on_t, on_p, counts = test_control(timeline, duration=duration, show=False)
     body = Body(legs)
-    times, poses = body.trajectory(on_t, on_p, counts)
+    times, poses, feet_states = body.trajectory(on_t, on_p, counts)
     command_fn = timeline_command(timeline)
 
     print("Pose at each command change (x, y in m, heading in deg, 90 = start):")
@@ -230,12 +235,113 @@ def test_body(timeline=DEFAULT_TIMELINE, duration=8000 * ms, animate=True, show=
 
     vis.plot_trajectory(body, times, poses, command_fn, show=show and not animate)
     if animate:
-        vis.animate_body(body, times, poses, command_fn, show=show)
+        vis.animate_body(body, times, poses, feet_states, command_fn, show=show)
     return times, poses
+
+
+def _front_gap(robot, pose):
+    """Shortest front sensor distance (m) at a pose."""
+    return float(robot.sensors.rays(pose)[2][:2].min())
+
+
+def _run_scenario(world, timeline, duration, start=(0.0, 0.0, np.pi / 2)):
+    robot = Robot(timeline_command(timeline), world=world, start=start)
+    robot.run(duration)
+    return robot
+
+
+def test_sensors(animate=True, show=True):
+    """
+    Sensor reflexes, scripted (the robot starts at (0, 0) facing up):
+      1. wall ahead, full forward: brakes, then yoyos (back-off) without touching it
+      2. wall behind, full reverse: same, yoyo forward
+      3. wall inside the back-off zone, spin on the spot: sensors gated off,
+         the spin is exactly the one without obstacle
+      4. wall inside the back-off zone, stop: sensors gated off, does not move
+      5. corridor, start off-centre, full forward: the side sensors centre the robot
+    Scenario 1 is also plotted (and animated).
+    """
+    results = []
+
+    def yoyo(robot, world):
+        """(touched the wall, number of direction changes along y)."""
+        poses = np.array(robot.poses)
+        dy = np.diff(poses[:, 1])
+        moves = np.sign(dy[np.abs(dy) > 1e-6])
+        hit = any(world.overlaps(np.vstack([robot.body.outline(p), p[:2]])) for p in poses)
+        return hit, int(np.sum(moves[1:] != moves[:-1]))
+
+    # 1. wall ahead
+    world = World([(-0.5, 1.0, 0.5, 1.2)])
+    timeline = [(0 * ms, 1.0, 0.0)]
+    robot = _run_scenario(world, timeline, 8000 * ms)
+    times, poses, feet_states = robot.trajectory()
+    gaps = np.array([_front_gap(robot, p) for p in poses])
+    hit, reversals = yoyo(robot, world)
+    results.append(("wall ahead, forward: no contact, yoyo",
+                    not hit and reversals >= 4,
+                    f"min gap {gaps.min():.3f} m, {reversals} direction changes"))
+    if animate or show:
+        vis.plot_trajectory(robot.body, times, poses, timeline_command(timeline),
+                            filename="sensors_wall.png", show=False, world=world,
+                            title="Sensors: full forward towards a wall (back-off yoyo)")
+    if animate:
+        vis.animate_body(robot.body, times, poses, feet_states, timeline_command(timeline),
+                         filename="sensors_wall.gif", show=False, world=world,
+                         sensors=robot.sensors)
+
+    # 2. wall behind
+    world = World([(-0.5, -1.0, 0.5, -0.8)])
+    robot = _run_scenario(world, [(0 * ms, -1.0, 0.0)], 8000 * ms)
+    hit, reversals = yoyo(robot, world)
+    rear_gap = min(float(robot.sensors.rays(p)[2][2:4].min()) for p in robot.poses)
+    results.append(("wall behind, reverse: no contact, yoyo", not hit and reversals >= 4,
+                    f"min rear gap {rear_gap:.3f} m, {reversals} direction changes"))
+
+    # 3. spin inside the back-off zone (nose at y = 0.15, wall at 0.25), compared with
+    #    the same spin without the wall
+    world = World([(-0.5, 0.25, 0.5, 0.45)])
+    spin = [(0 * ms, 0.0, -1.0)]
+    poses = np.array(_run_scenario(world, spin, 2000 * ms).poses)
+    free = np.array(_run_scenario(World([]), spin, 2000 * ms).poses)
+    ok = len(poses) == len(free) and np.allclose(poses, free, atol=1e-9)
+    results.append(("spin next to a wall: sensors gated off", ok,
+                    f"turned {np.degrees(poses[-1, 2] - poses[0, 2]):.1f} deg "
+                    f"(without wall {np.degrees(free[-1, 2] - free[0, 2]):.1f}), "
+                    f"moved {np.linalg.norm(poses[-1, :2] - poses[0, :2]):.4f} m"))
+
+    # 4. stop inside the back-off zone
+    robot = _run_scenario(world, [(0 * ms, 0.0, 0.0)], 2000 * ms)
+    poses = np.array(robot.poses)
+    moved = float(np.max(np.abs(poses - poses[0])))
+    results.append(("stop in the back-off zone: sensors gated off, does not move",
+                    moved == 0.0, f"front gap {_front_gap(robot, poses[0]):.3f} m, "
+                                  f"largest pose change {moved:.4f}"))
+
+    # 5. corridor 0.5 m wide, start 8 cm off-centre: the side sensors centre the robot
+    world = World([(-0.55, 0.2, -0.25, 2.0), (0.25, 0.2, 0.55, 2.0)])
+    robot = _run_scenario(world, [(0 * ms, 1.0, 0.0)], 6000 * ms, start=(-0.08, 0.0, np.pi / 2))
+    poses = np.array(robot.poses)
+    inside = poses[:, 1] > 0.6                        # well inside the corridor
+    hit = any(world.overlaps(np.vstack([robot.body.outline(p), p[:2]])) for p in poses)
+    off = np.abs(poses[inside, 0])
+    results.append(("corridor, forward: no contact, centred", not hit and off[-4:].max() < 0.04,
+                    f"off-centre 0.080 -> max {off.max():.3f}, last {off[-1]:.3f} m"))
+
+    print("Sensor reflexes:")
+    for name, ok, detail in results:
+        print(f"  [{'OK' if ok else 'FAILED'}] {name}: {detail}")
+    print("All sensor checks passed." if all(ok for _, ok, _ in results)
+          else "Some sensor checks FAILED.")
+    if show:
+        import matplotlib.pyplot as plt
+        plt.show()
+    return results
 
 
 if __name__ == '__main__':
     # test_cpg()
     # test_legs()
     # test_control()
-    test_body()
+    # test_body()
+    test_sensors()

@@ -193,10 +193,14 @@ def _command_changes(times, command_fn):
     return [k for k in range(len(times)) if k == 0 or cmds[k] != cmds[k - 1]], cmds
 
 
-def _top_view_axes(ax, body, poses):
-    """Fixed, square, equal-ratio limits containing the whole trajectory, with a grid."""
+def _top_view_axes(ax, body, poses, margin=None):
+    """
+    Fixed, square, equal-ratio limits containing the whole trajectory (+ margin,
+    default one body length), with a grid.
+    """
+    margin = body.length if margin is None else margin
     centre = (poses[:, :2].min(axis=0) + poses[:, :2].max(axis=0)) / 2
-    half = np.max(np.ptp(poses[:, :2], axis=0)) / 2 + body.length
+    half = np.max(np.ptp(poses[:, :2], axis=0)) / 2 + margin
     ax.set_xlim(centre[0] - half, centre[0] + half)
     ax.set_ylim(centre[1] - half, centre[1] + half)
     ax.set_aspect('equal')
@@ -205,15 +209,51 @@ def _top_view_axes(ax, body, poses):
     ax.set_ylabel('y (m)')
 
 
-def plot_trajectory(body, times, poses, command_fn, filename="body_trajectory.png", show=True):
+def _draw_world(ax, world):
+    """Arena walls and obstacles (static)."""
+    from matplotlib.patches import Rectangle
+    h = world.size / 2
+    ax.add_patch(Rectangle((-h, -h), world.size, world.size, fill=False, edgecolor='black',
+                           linewidth=2, zorder=1))
+    for x0, y0, x1, y1 in world.obstacles:
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor='dimgrey',
+                               edgecolor='black', zorder=1))
+
+
+def _body_color(world, body, pose):
+    """Orange, or red when the body overlaps an obstacle or leaves the arena."""
+    if world is not None and world.overlaps(np.vstack([body.outline(pose), pose[:2]])):
+        return 'red'
+    return 'tab:orange'
+
+
+def _sensor_artists(ax, sensors, animated=False):
+    """One line per line of sight."""
+    return [ax.plot([], [], linewidth=1.5, zorder=2, animated=animated)[0]
+            for _ in range(len(sensors.ranges))]
+
+
+def _update_sensors(lines, sensors, pose):
+    """Lines of sight at a pose, coloured by activity (green = far, red = near)."""
+    origins, ends, dist = sensors.rays(pose)
+    for line, o, e, a in zip(lines, origins, ends, sensors.near(dist)):
+        line.set_data([o[0], e[0]], [o[1], e[1]])
+        line.set_color(plt.cm.RdYlGn_r(a))
+
+
+def plot_trajectory(body, times, poses, command_fn, filename="body_trajectory.png", show=True,
+                    world=None, title=None):
     """
     Top view of the whole run: heading arrow at every half-cycle (colour = time),
     numbered markers at the command changes (listed in the box), body outline at the end.
-    times, poses: from Body.trajectory().
+    times, poses: from Body.trajectory() or Robot.trajectory(); world: drawn if given.
     """
     from matplotlib.patches import Polygon
     fig, ax = plt.subplots(figsize=(8, 8))
-    _top_view_axes(ax, body, poses)
+    # with a world: wider margin, so the obstacles near the path are visible
+    _top_view_axes(ax, body, poses, None if world is None else 2 * body.length)
+    if world is not None:
+        _draw_world(ax, world)
     ax.plot(poses[:, 0], poses[:, 1], color='grey', linewidth=0.8, zorder=2)
     arrows = ax.quiver(poses[:, 0], poses[:, 1], np.cos(poses[:, 2]), np.sin(poses[:, 2]),
                        times / 1000, cmap='viridis', scale=25, width=0.004, zorder=3)
@@ -234,34 +274,69 @@ def plot_trajectory(body, times, poses, command_fn, filename="body_trajectory.pn
                     fontsize=9, fontweight='bold', zorder=5)
     ax.text(0.02, 0.98, "\n".join(lines), transform=ax.transAxes, va='top', fontsize=8,
             family='monospace', bbox=dict(facecolor='white', alpha=0.8, edgecolor='grey'))
-    ax.set_title('Hexapod top view (arrows: heading every half-cycle; dashed: final pose)')
+    ax.set_title(title or 'Hexapod top view (arrows: heading every half-cycle; dashed: final pose)')
     _finish(filename, show)
 
 
-def animate_body(body, times, poses, command_fn, fps=20, filename="body_animation.gif",
-                 show=True):
+LEGS_LEGEND = 'tripod A blue, B red | filled foot: on the ground, hollow: raised'
+
+
+def _leg_artists(ax, body, animated=False):
+    """Lines (hip -> foot) and foot markers of the drawn legs, coloured by tripod."""
+    colors = ['blue' if leg.phase == 0 else 'red' for leg in body.shown]
+    lines = [ax.plot([], [], color=c, linewidth=2, zorder=4, animated=animated)[0] for c in colors]
+    marks = [ax.plot([], [], 'o', color=c, markersize=7, zorder=5, animated=animated)[0]
+             for c in colors]
+    return lines, marks, colors
+
+
+def _update_legs(artists, feet):
+    """Move the leg artists to (hips, feet, raised) from Body.feet()."""
+    for line, mark, color, hip, foot, up in zip(*artists, *feet):
+        line.set_data([hip[0], foot[0]], [hip[1], foot[1]])
+        mark.set_data([foot[0]], [foot[1]])
+        mark.set_markerfacecolor('white' if up else color)
+
+
+def animate_body(body, times, poses, feet_states, command_fn, fps=20,
+                 filename="body_animation.gif", show=True, world=None, sensors=None):
     """
-    Real-time top-view animation: body arrow, trail, time and current command.
+    Real-time top-view animation: body arrow, legs, trail, time and current command;
+    with a world: obstacles, lines of sight, body red when overlapping an obstacle.
     Poses are interpolated linearly inside each half-cycle (the stance push is
     spread over the half-cycle). Saved as a GIF when filename is given.
+    times, poses, feet_states: from Body.trajectory() or Robot.trajectory().
     """
     from matplotlib.animation import FuncAnimation, PillowWriter
     from matplotlib.patches import Polygon
     frame_t = np.arange(times[0], times[-1] + 1e-9, 1000 / fps)
     frames = np.column_stack([np.interp(frame_t, times, poses[:, k]) for k in range(3)])
+    # half-cycle of each frame (for the feet)
+    cycle = np.clip(np.searchsorted(times, frame_t, side='right') - 1, 0, len(feet_states) - 1)
 
     fig, ax = plt.subplots(figsize=(7, 7))
-    _top_view_axes(ax, body, poses)
+    # with a world: wider margin, so the obstacles near the path are visible
+    _top_view_axes(ax, body, poses, None if world is None else 2 * body.length)
+    if world is not None:
+        _draw_world(ax, world)
     ax.plot(poses[:, 0], poses[:, 1], color='lightgrey', linewidth=0.8, linestyle=':')
-    trail, = ax.plot([], [], color='tab:blue', linewidth=1.5, zorder=3)
+    trail, = ax.plot([], [], color='grey', linewidth=1.5, zorder=2)
+    rays = _sensor_artists(ax, sensors) if sensors is not None else []
     shape = ax.add_patch(Polygon(body.outline(frames[0]), closed=True, facecolor='tab:orange',
-                                 edgecolor='black', alpha=0.6, zorder=2))
+                                 edgecolor='black', alpha=0.6, zorder=3))
+    legs = _leg_artists(ax, body)
     label = ax.text(0.02, 0.98, '', transform=ax.transAxes, va='top', family='monospace')
+    ax.text(0.02, 0.02, LEGS_LEGEND, transform=ax.transAxes, fontsize=8)
     ax.set_title('Hexapod top view (steer < 0 = left)')
 
     def update(f):
         trail.set_data(frames[:f + 1, 0], frames[:f + 1, 1])
         shape.set_xy(body.outline(frames[f]))
+        shape.set_facecolor(_body_color(world, body, frames[f]))
+        if rays:
+            _update_sensors(rays, sensors, frames[f])
+        c = cycle[f]
+        _update_legs(legs, body.feet(frames[f], frame_t[f] - times[c], feet_states[c]))
         speed, steer = command_fn(frame_t[f] * ms)
         label.set_text(f"t = {frame_t[f] / 1000:5.2f} s\nspeed {speed:+.2f}\nsteer {steer:+.2f}")
         return trail, shape, label
@@ -282,19 +357,22 @@ class LiveTopView:
     the robot when it gets close to the edge.
     Legs: the 6 drawn legs of the body, coloured by tripod (blue = A, red = B);
     filled foot = on the ground, hollow foot = raised.
+    World (optional): obstacles, lines of sight coloured by activity (green = far,
+    red = near), body red when it overlaps an obstacle.
     Blitting: the axes background is rendered once (and on resize / re-centring),
     only the moving artists are redrawn at each frame.
     """
 
     def __init__(self, body, on_press, on_release, half_size=0.75,
-                 title='Arrows: drive | Esc or close: quit'):
+                 title='Arrows: drive | Esc or close: quit', world=None, sensors=None):
         # free the arrow keys from matplotlib's default shortcuts (back / forward)
         for name, key in (('keymap.back', 'left'), ('keymap.forward', 'right')):
             if key in plt.rcParams[name]:
                 plt.rcParams[name].remove(key)
         from matplotlib.patches import Polygon
         self.body, self.half_size = body, half_size
-        self.centre = np.zeros(2)
+        self.world, self.sensors = world, sensors
+        self.centre = body.pose[:2].copy()
         self.trail_xy = []
 
         self.fig, self.ax = plt.subplots(figsize=(7, 7))
@@ -304,20 +382,18 @@ class LiveTopView:
         self.ax.set_xlabel('x (m)')
         self.ax.set_ylabel('y (m)')
         self.ax.set_title(title)
+        if world is not None:
+            _draw_world(self.ax, world)
         self.trail, = self.ax.plot([], [], color='grey', linewidth=1.5, zorder=2,
                                    animated=True)
+        self.rays = _sensor_artists(self.ax, sensors, animated=True) if sensors is not None else []
         self.shape = self.ax.add_patch(Polygon(body.outline(body.pose), closed=True,
                                                facecolor='tab:orange', edgecolor='black',
                                                alpha=0.6, zorder=3, animated=True))
-        self.leg_colors = ['blue' if leg.phase == 0 else 'red' for leg in body.shown]
-        self.leg_lines = [self.ax.plot([], [], color=c, linewidth=2, zorder=4, animated=True)[0]
-                          for c in self.leg_colors]
-        self.foot_marks = [self.ax.plot([], [], 'o', color=c, markersize=7, zorder=5,
-                                        animated=True)[0] for c in self.leg_colors]
+        self.legs = _leg_artists(self.ax, body, animated=True)
         self.label = self.ax.text(0.02, 0.98, '', transform=self.ax.transAxes, va='top',
                                   family='monospace', animated=True)
-        self.ax.text(0.02, 0.02, 'tripod A blue, B red | filled foot: on the ground, '
-                     'hollow: raised', transform=self.ax.transAxes, fontsize=8)
+        self.ax.text(0.02, 0.02, LEGS_LEGEND, transform=self.ax.transAxes, fontsize=8)
         self.background = None
         canvas = self.fig.canvas
         canvas.mpl_connect('draw_event', self._on_full_draw)
@@ -331,7 +407,8 @@ class LiveTopView:
         self._draw_moving()
 
     def _draw_moving(self):
-        for artist in (self.trail, self.shape, *self.leg_lines, *self.foot_marks, self.label):
+        for artist in (self.trail, *self.rays, self.shape, *self.legs[0], *self.legs[1],
+                       self.label):
             self.fig.draw_artist(artist)
 
     def _set_limits(self):
@@ -347,7 +424,7 @@ class LiveTopView:
 
     def draw(self, pose, t_ms, speed, steer, feet):
         """
-        Update and redraw the body, legs, trail and text.
+        Update and redraw the body, legs, sensors, trail and text.
         feet: (hips, feet, raised) from Body.feet().
         """
         if np.max(np.abs(pose[:2] - self.centre)) > 0.8 * self.half_size:
@@ -358,12 +435,11 @@ class LiveTopView:
         xy = np.array(self.trail_xy)
         self.trail.set_data(xy[:, 0], xy[:, 1])
         self.shape.set_xy(self.body.outline(pose))
-        for line, mark, color, hip, foot, up in zip(self.leg_lines, self.foot_marks,
-                                                    self.leg_colors, *feet):
-            line.set_data([hip[0], foot[0]], [hip[1], foot[1]])
-            mark.set_data([foot[0]], [foot[1]])
-            mark.set_markerfacecolor('white' if up else color)
-        mode ='stop' if speed == 0 and steer == 0 else 'spin' if speed == 0 else 'walk'
+        self.shape.set_facecolor(_body_color(self.world, self.body, pose))
+        if self.rays:
+            _update_sensors(self.rays, self.sensors, pose)
+        _update_legs(self.legs, feet)
+        mode = 'stop' if speed == 0 and steer == 0 else 'spin' if speed == 0 else 'walk'
         self.label.set_text(f"t = {t_ms / 1000:6.2f} s\n{mode}\nspeed {speed:+.2f}\n"
                             f"steer {steer:+.2f}")
         canvas = self.fig.canvas

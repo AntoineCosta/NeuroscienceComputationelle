@@ -27,8 +27,8 @@ class Body:
     Foot of a drawn leg, relative to its hip, for each half-cycle:
       - fore-aft sweep centred on the hip: F moves the foot backward, B forward,
         stride / N per neuron (with an unchanged command the swing mirrors the stance)
-      - raised by R, lowered by D (at their spike times); a leg with no spike keeps
-        its foot where it is.
+      - raised by R, lowered by D (at their spike times); with no F / B spike the
+        foot stays where it is.
     Body frame: x forward, y left.
     """
 
@@ -87,47 +87,56 @@ class Body:
         self.up_before = self.up_after.copy()
         for k, leg in enumerate(self.shown):
             c = counts_c[leg.index]
-            if not c.any():                # idle leg: foot stays where it is
+            if c[FORWARD] or c[BACKWARD]:
+                sweep = (c[BACKWARD] - c[FORWARD]) * self.stride / self.legs.n_motor
+                self.foot_from[k], self.foot_to[k] = -sweep / 2, sweep / 2
+            else:                          # no stroke: foot stays where it is
                 self.foot_from[k] = self.foot_to[k]
-                continue
-            sweep = (c[BACKWARD] - c[FORWARD]) * self.stride / self.legs.n_motor
-            self.foot_from[k], self.foot_to[k] = -sweep / 2, sweep / 2
             if c[LOWER]:
                 self.up_after[k], self.switch_ms[k] = False, exc_ms
             if c[RAISE]:
                 self.up_after[k], self.switch_ms[k] = True, exc_ms + lift_ms
 
-    def feet(self, pose, t_in_ms):
+    def feet_state(self):
+        """Copy of the drawn feet state of the latest step() (for replays)."""
+        return tuple(a.copy() for a in (self.foot_from, self.foot_to, self.up_before,
+                                        self.up_after, self.switch_ms))
+
+    def feet(self, pose, t_in_ms, state=None):
         """
-        Drawn legs at a pose, t_in_ms after the CPG spike of the latest step().
+        Drawn legs at a pose, t_in_ms after the CPG spike of the latest step()
+        (or of the half-cycle whose feet_state() is given).
         Returns (hips [6, 2], feet [6, 2], raised [6]) in world coordinates.
         """
+        foot_from, foot_to, up_before, up_after, switch_ms = state or self.feet_state()
         a = np.clip(t_in_ms / float(self.legs.cpg.period / 2 / ms), 0, 1)
-        fore = self.foot_from + a * (self.foot_to - self.foot_from)
+        fore = foot_from + a * (foot_to - foot_from)
         local_feet = np.column_stack([self.hips[:, 0] + fore, self.foot_lateral])
-        raised = np.where(t_in_ms >= self.switch_ms, self.up_after, self.up_before)
-        return self._to_world(self.hips, pose), self._to_world(local_feet, pose), raised
+        raised = np.where(t_in_ms >= switch_ms, up_after, up_before)
+        return self.to_world(self.hips, pose), self.to_world(local_feet, pose), raised
 
     def trajectory(self, on_t, on_p, counts):
         """
         Replay a recorded run (output of LegSet.recruitment) from the current pose.
-        Returns (times in ms, poses [k, 3]): poses at the start of every half-cycle
-        and at the end of the last one.
+        Returns (times in ms, poses [k, 3], feet_states):
+          poses at the start of every half-cycle and at the end of the last one,
+          feet_states[c]: feet_state() of half-cycle c (for feet()).
         """
         half_ms = float(self.legs.cpg.period / 2 / ms)
         times = np.append(on_t, on_t[-1] + half_ms)
-        poses = [self.pose.copy()]
+        poses, feet_states = [self.pose.copy()], []
         for c, p in enumerate(on_p):
             poses.append(self.step(counts[c], p).copy())
-        return times, np.array(poses)
+            feet_states.append(self.feet_state())
+        return times, np.array(poses), feet_states
 
     def outline(self, pose):
         """Corners (x, y) of the body drawn as an arrow-shaped polygon at a pose."""
         l, w = self.length / 2, self.width / 2
-        return self._to_world(np.array([[-l, -w], [l / 2, -w], [l, 0.0], [l / 2, w], [-l, w]]), pose)
+        return self.to_world(np.array([[-l, -w], [l / 2, -w], [l, 0.0], [l / 2, w], [-l, w]]), pose)
 
     @staticmethod
-    def _to_world(local, pose):
+    def to_world(local, pose):
         """Body-frame points (x forward, y left) -> world coordinates."""
         c, s = np.cos(pose[2]), np.sin(pose[2])
         return local @ np.array([[c, s], [-s, c]]) + pose[:2]

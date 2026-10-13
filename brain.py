@@ -31,6 +31,12 @@ class Brain:
     def __init__(self, layer):
         self.layer = layer
         self.layer.neurons.brain = self.STOP
+        self.layer.neurons.gate = 0.0            # stopped: sensors off
+
+    @staticmethod
+    def is_spin(speed, steer):
+        """Turning on the spot: speed 0 with a steer."""
+        return speed == 0 and steer != 0
 
     @staticmethod
     def outputs(speed, steer=0.0):
@@ -39,7 +45,7 @@ class Brain:
         steer = float(np.clip(steer, -1, 1))
         s = abs(speed)
         out = Brain.STOP.copy()
-        if speed == 0 and steer != 0:           # turn on the spot
+        if Brain.is_spin(speed, steer):         # turn on the spot
             a = abs(steer)
             if steer < 0:
                 out[[I_REV_L, I_FWD_R]] = 1 - a  # left legs reverse, right legs forward
@@ -55,8 +61,13 @@ class Brain:
         return out
 
     def set_command(self, speed, steer=0.0):
-        """Apply a command (takes effect at the next CPG spike)."""
+        """
+        Apply a command (takes effect at the next CPG spike). The sensors are gated on
+        only while walking (speed != 0): stopped or turning on the spot, they never
+        move the robot.
+        """
         self.layer.neurons.brain = self.outputs(speed, steer)
+        self.layer.neurons.gate = 1.0 if speed != 0 else 0.0
 
     def driver(self, command_fn):
         """

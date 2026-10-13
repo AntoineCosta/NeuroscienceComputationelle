@@ -2,14 +2,11 @@
 import os
 import time
 import numpy as np
-from brian2 import Network, SpikeMonitor, network_operation, ms, second
+from brian2 import network_operation, ms, second
 
 import config
-from CPG import CPG
-from legs import LegSet
-from intermediates import IntermediateLayer
-from brain import Brain
-from body import Body
+from robot import Robot
+from world import World
 import visualisation as vis
 
 KEY_SPEED = 1.0   # up / down: walking speed
@@ -106,7 +103,7 @@ class Gamepad(Keyboard):
 
 
 def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=0.75,
-               max_duration=3600 * second, keys=None):
+               max_duration=3600 * second, keys=None, world=None, start=(0.0, 0.0, np.pi / 2)):
     """
     Live manual control in (approximately) real time, in a matplotlib window.
     Game controller (if pygame is installed, see Gamepad) and keyboard:
@@ -116,12 +113,12 @@ def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=0
       Esc or close the window    quit
     The window needs the keyboard focus for the keys (click on it once).
 
+    The robot walks in a world (default: World() layout) and its distance sensors
+    act as reflexes on the intermediates (see sensors.py).
     Commands are latched at each CPG half-cycle (as in the scripted tests). The body
     moves by one stance push per half-cycle, computed as soon as its spikes are in
-    (exc_delay + lift_delay after the CPG spike) and shown during that same
-    half-cycle: 0 to 1/4 s between key and motion (next CPG spike).
-    Returns (times, poses): CPG spike time (ms) of each push and the pose after it
-    (first entry: start pose).
+    and shown during that same half-cycle: 0 to 1/4 s between key and motion.
+    Returns the Robot (its trajectory() holds the run).
     keys: command source (default: Gamepad, or Keyboard if pygame is missing);
           anything with press(key), release(key), command(t) and a `quit` flag.
     """
@@ -131,68 +128,40 @@ def run_manual(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, fps=20, view_size=0
         except ImportError:
             print("pygame not installed: keyboard only.")
             keys = Keyboard()
-    cpg = CPG(period=config.CYCLE_PERIOD)
-    legs = LegSet(cpg, n_legs=n_legs, n_motor=n_motor)
-    layer = IntermediateLayer(cpg, legs)
-    brain = Brain(layer)
-    body = Body(legs)
-    view = vis.LiveTopView(body, keys.press, keys.release, half_size=view_size)
-
-    mon_cpg = SpikeMonitor(cpg.neurons)
-    mon_motor = SpikeMonitor(legs.motors)
-    half_ms = float(cpg.period / 2 / ms)
-    # all motor spikes caused by a CPG spike are in after this time (R is the last one)
-    settle_ms = float((legs.exc_delay + legs.lift_delay) / ms) + 1
-    times, poses = [0.0], [body.pose.copy()]
-    n_seen = 0             # motor spikes already used by the odometry
-    n_cpg_seen = 0         # CPG spikes (half-cycles) already used by the odometry
+    robot = Robot(keys.command, world=World() if world is None else world,
+                  n_legs=n_legs, n_motor=n_motor, start=start)
+    view = vis.LiveTopView(robot.body, keys.press, keys.release, half_size=view_size,
+                           world=robot.world, sensors=robot.sensors)
     wall_start = None      # wall-clock time of simulation time 0
-
-    def odometry(t_ms):
-        """Move the body by the latest half-cycle, once all its motor spikes are in."""
-        nonlocal n_seen, n_cpg_seen
-        if mon_cpg.num_spikes == n_cpg_seen:
-            return
-        t_cpg = float(np.asarray(mon_cpg.t / ms)[-1])
-        if t_ms < t_cpg + settle_ms:
-            return
-        phase = int(np.asarray(mon_cpg.i[:])[-1])
-        body.step(legs.spike_counts(mon_motor.i[n_seen:]), phase)
-        n_seen, n_cpg_seen = mon_motor.num_spikes, mon_cpg.num_spikes
-        times.append(t_cpg)
-        poses.append(body.pose.copy())
 
     @network_operation(dt=1000 / fps * ms, when='end')
     def display(t):
-        """Update the odometry, draw the body (push spread over its half-cycle), keep real time."""
+        """Draw the robot at its current pose and keep real time."""
         nonlocal wall_start
         if keys.quit or not view.is_open:
-            net.stop()
+            robot.net.stop()
             return
         t_ms = float(t / ms)
-        odometry(t_ms)
-        a = np.clip((t_ms - times[-1]) / half_ms, 0, 1)
-        start = poses[-2] if len(poses) > 1 else poses[-1]
-        pose = start + a * (poses[-1] - start)
-        view.draw(pose, t_ms, *keys.command(t), body.feet(pose, t_ms - times[-1]))
+        robot.odometry(t_ms)
+        pose = robot.pose_at(t_ms)
+        view.draw(pose, t_ms, *keys.command(t), robot.feet_at(t_ms, pose))
 
         now = time.perf_counter()
         if wall_start is None or wall_start + t_ms / 1000 < now - 0.2:
             wall_start = now - t_ms / 1000     # (re)synchronise if late: no catch-up rush
         view.wait(wall_start + t_ms / 1000 - now)
 
-    net = Network(*cpg.objects, *legs.objects, *layer.objects, brain.driver(keys.command),
-                  display, mon_cpg, mon_motor)
+    robot.net.add(display)
     print("Manual control: left stick speed + right stick steer (or arrows), D-pad or arrows "
           "alone to turn on the spot, Start / Esc / close the window to quit "
           "(click on the window for the keys).")
-    net.run(max_duration)
+    robot.run(max_duration)
     if view.is_open:
         view.close()
-    x, y, heading = body.pose
-    print(f"Stopped at t={float(net.t / second):.2f} s: x={x:+.3f} m, y={y:+.3f} m, "
+    x, y, heading = robot.body.pose
+    print(f"Stopped at t={float(robot.net.t / second):.2f} s: x={x:+.3f} m, y={y:+.3f} m, "
           f"heading={np.degrees(heading):.1f} deg")
-    return np.array(times), np.array(poses)
+    return robot
 
 
 if __name__ == '__main__':

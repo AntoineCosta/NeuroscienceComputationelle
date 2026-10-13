@@ -2,7 +2,7 @@
 from brian2 import *
 import numpy as np
 
-from legs import FORWARD
+from legs import RAISE, FORWARD
 
 # Intermediate neuron indices
 I_FWD_L, I_FWD_R, I_REV_L, I_REV_R, I_STEER_L, I_STEER_R = range(6)
@@ -15,26 +15,29 @@ class IntermediateLayer:
     """
     Six graded (non-spiking) inhibitory interneurons, one per brain command.
 
-    Each intermediate is silent at rest. Its activity is the sum of its excitatory
-    inputs, saturating at 1:
-        level = clip(brain + sensor, 0, 1)
-    brain: set by the Brain (regular code); sensor: sensor neurons (TODO).
-    Every input therefore means "brake": a sensor can only slow down or turn the robot.
+    Each intermediate is silent at rest. Its activity is the sum of its inputs,
+    saturating at 0 and 1:
+        level = clip(brain + gate * sensor, 0, 1)
+    brain : set by the Brain (regular code)
+    sensor: summed input from the sensor neurons (sensors.py). Mostly excitatory
+            (brake); the back-off reflex inhibits the opposite direction (disinhibition).
+    gate  : set by the Brain, 1 only while walking (stopped or spinning: sensors ignored).
 
     At each CPG spike (phase signal), each intermediate releases an inhibition of
     level * N threshold steps onto its targets, arriving before the CPG EPSP:
 
       I-Fwd-X (side X): forward walking of side X
-          F of the legs in stance, B of the legs in swing, R and D
+          F of the legs in stance, B of the legs in swing, R
       I-Rev-X (side X): reverse walking of side X
-          B of the legs in stance, F of the legs in swing, R and D
+          B of the legs in stance, F of the legs in swing, R
       I-Steer-X (side X): F and B of side X, in both phases
+    D is never braked: every stance onset lowers the foot.
 
     Example, forward at speed s (I-Fwd = 1 - s, I-Rev = 1, I-Steer = 0):
       F in stance : N - (1 - s)N = sN fired    (push)
       B in swing  : N - (1 - s)N = sN fired    (return, mirrors the push)
       B in stance, F in swing : N - N = 0
-      R / D (EPSP 2N) : 2N - (1 - s)N - N = sN > 0 -> the leg steps
+      R (EPSP 2N) : 2N - (1 - s)N - N = sN > 0 -> the leg lifts
     With all intermediates at 0 everything would fire: the Brain must send the stop
     pattern by default.
 
@@ -50,8 +53,9 @@ class IntermediateLayer:
 
         self.eqs = '''
         brain : 1                            # input from the brain (regular code)
-        sensor : 1                           # input from the sensor neurons (TODO)
-        level = clip(brain + sensor, 0, 1) : 1   # graded activity, saturates at 1
+        sensor : 1                           # summed input from the sensor neurons
+        gate : 1                             # sensor gate, set by the brain
+        level = clip(brain + gate * sensor, 0, 1) : 1   # graded activity in [0, 1]
         release_now : boolean                # set by the phase signal at each CPG spike
         stance_phase : integer               # CPG phase of the legs in stance
         itype : integer (constant)           # drive / steer
@@ -77,7 +81,7 @@ class IntermediateLayer:
         self.drive = Synapses(self.neurons, legs.motors, on_event='release', namespace=ns, on_pre=f'''
             in_stance = int(kind_post == {FORWARD} + direction_pre) * int(phase_post == stance_phase_pre)
             in_swing = int(kind_post == {FORWARD + 1} - direction_pre) * int(phase_post != stance_phase_pre)
-            v_post -= w_full * level_pre * (in_stance + in_swing + int(kind_post < {FORWARD}))''')
+            v_post -= w_full * level_pre * (in_stance + in_swing + int(kind_post == {RAISE}))''')
         self.drive.connect(condition=f'itype_pre == {T_DRIVE} and side_post == side_pre')
         self.drive.delay = legs.input_delay(self.drive, 0*ms)
 

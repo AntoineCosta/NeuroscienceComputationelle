@@ -51,8 +51,10 @@ class LegSet:
       - D (lower) <- CPG p (stance onset)
       - R (raise) <- CPG 1-p (swing onset), delayed by lift_delay
       - F and B   <- both CPG neurons (direction selected by the intermediate layer)
-    R and D get an EPSP of 2N*u: they are braked by both direction intermediates
-    (forward and reverse), so they step as soon as either direction has some speed.
+    R gets an EPSP of 2N*u: it is braked by both direction intermediates (forward and
+    reverse), so the leg lifts as soon as either direction has some speed.
+    D gets N*u and is never braked: every stance onset puts the foot down, so at stop
+    all feet end up on the ground (lowering a foot already down changes nothing).
     """
 
     def __init__(self, cpg, n_legs=N_LEGS, n_motor=N_MOTOR, tau_m=TAU_M,
@@ -104,7 +106,7 @@ class LegSet:
 
         self.legs = [Leg(self.motors, i, n, n_legs) for i in range(n_legs)]
 
-        # --- CPG excitation: one EPSP of N*u (F/B) or 2N*u (R/D) per CPG spike ------
+        # --- CPG excitation: one EPSP of N*u (F/B/D) or 2N*u (R) per CPG spike -------
         # v leaks for one step between the synaptic jump and the threshold test:
         # the weight compensates it so v = N*u (2N*u) exactly when tested.
         self.excitation = Synapses(cpg.neurons, self.motors, model='w : volt (constant)',
@@ -112,8 +114,8 @@ class LegSet:
         self.excitation.connect(condition=f'kind_post >= {FORWARD} '
                                           f'or (kind_post == {LOWER} and i == phase_post) '
                                           f'or (kind_post == {RAISE} and i != phase_post)')
-        is_fb = np.asarray(self.motors.kind[:])[np.asarray(self.excitation.j[:])] >= FORWARD
-        self.excitation.w = (np.where(is_fb, n, 2 * n) * float(u / volt)
+        is_r = np.asarray(self.motors.kind[:])[np.asarray(self.excitation.j[:])] == RAISE
+        self.excitation.w = (np.where(is_r, 2 * n, n) * float(u / volt)
                              * np.exp(float(defaultclock.dt / tau_m))) * volt
         self.excitation.delay = self.input_delay(self.excitation, exc_delay)
 
