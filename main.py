@@ -1,25 +1,26 @@
 """
-Hexapod controlled by a spiking neural network (Brian2) - entry point and test scenarios.
+Hexapode piloté par un réseau de neurones à potentiels d'action (Brian2) - point d'entrée et scénarios de test.
 
-Modules:
-  config.py         global parameters (legs, neurons per group, rhythm, delays, dt)
-  CPG.py            rhythm generator (one spike per half-cycle)
-  legs.py           leg motor neurons (R, D, F, B groups)
-  intermediates.py  6 graded inhibitory interneurons between the brain and the legs
-  brain.py          the 'brain': regular code turning commands into intermediate inputs
-  body.py           top-view body pose, moved by the stance legs (differential drive)
-  world.py          arena walls and static rectangular obstacles
-  sensors.py        4 graded distance sensors (reflexes on the intermediates)
-  robot.py          the closed loop: network + body + world + sensors
-  manual.py         live manual control: game controller or arrow keys (python manual.py)
-  visualisation.py  all plots
+Modules :
+  config.py         paramètres globaux (pattes, neurones par groupe, rythme, délais, dt)
+  CPG.py            générateur de rythme (un potentiel d'action par demi-cycle)
+  legs.py           motoneurones des pattes (groupes R, D, F, B)
+  intermediates.py  6 interneurones inhibiteurs gradués entre le cerveau et les pattes
+  brain.py          le « cerveau » : code classique qui traduit les commandes en entrées des intermédiaires
+  body.py           pose du corps vue de dessus, déplacée par les pattes en appui (comme un char)
+  world.py          murs de l'arène et obstacles rectangulaires fixes
+  sensors.py        6 capteurs de distance gradués (réflexes sur les intermédiaires)
+  robot.py          la boucle fermée : réseau + corps + monde + capteurs
+  manual.py         pilotage manuel en direct : manette ou flèches (python manual.py)
+  visualisation.py  toutes les figures
 
-TODO (project roadmap)
-- Faster CPG to cut the command latency (a command waits up to half a period for the
-  next CPG spike). Constraints: TAU_M <= period / 20, EXC_DELAY + LIFT_DELAY < period / 2,
-  STRIDE per half-cycle (walking speed doubles if the period halves).
-- Steering is not direction-aware: during a back-off, the turn-away brake swings the
-  nose back towards the obstacle (accepted for now).
+TODO (feuille de route du projet)
+- CPG plus rapide pour réduire la latence des commandes (une commande attend jusqu'à une
+  demi-période le prochain potentiel d'action du CPG). Contraintes : TAU_M <= période / 20,
+  EXC_DELAY + LIFT_DELAY < période / 2, STRIDE par demi-cycle (la vitesse de marche double
+  si la période est divisée par deux).
+- Le virage ne tient pas compte du sens de marche : pendant un recul, le frein d'évitement
+  ramène le nez vers l'obstacle (accepté pour l'instant).
 """
 import numpy as np
 from brian2 import Network, SpikeMonitor, StateMonitor, Synapses, defaultclock, ms
@@ -36,7 +37,7 @@ import visualisation as vis
 
 
 def test_cpg(n_cycles=4, filename="cpg_test.png", show=True):
-    """Isolated CPG: checks period and anti-phase, then plots."""
+    """CPG seul : vérifie la période et l'anti-phase, puis trace la figure."""
     cpg = CPG(period=config.CYCLE_PERIOD)
     mon_state = StateMonitor(cpg.neurons, 'v', record=True)
     mon_spikes = SpikeMonitor(cpg.neurons)
@@ -45,11 +46,11 @@ def test_cpg(n_cycles=4, filename="cpg_test.png", show=True):
 
     trains = mon_spikes.spike_trains()
     t_a, t_b = np.asarray(trains[0] / ms), np.asarray(trains[1] / ms)
-    print(f"Phase A spikes (ms): {t_a.tolist()}")
-    print(f"Phase B spikes (ms): {t_b.tolist()}")
-    print(f"Periods A: {np.diff(t_a).tolist()}, B: {np.diff(t_b).tolist()} "
-          f"(expected {float(cpg.period / ms)})")
-    print(f"Lag B - A: {(t_b - t_a[:len(t_b)]).tolist()} (expected {float(cpg.period / 2 / ms)})")
+    print(f"Potentiels d'action phase A (ms) : {t_a.tolist()}")
+    print(f"Potentiels d'action phase B (ms) : {t_b.tolist()}")
+    print(f"Périodes A : {np.diff(t_a).tolist()}, B : {np.diff(t_b).tolist()} "
+          f"(attendu {float(cpg.period / ms)})")
+    print(f"Décalage B - A : {(t_b - t_a[:len(t_b)]).tolist()} (attendu {float(cpg.period / 2 / ms)})")
 
     vis.plot_cpg(cpg, mon_state, mon_spikes, filename=filename, show=show)
     return t_a, t_b
@@ -58,14 +59,15 @@ def test_cpg(n_cycles=4, filename="cpg_test.png", show=True):
 def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
               inhibition=None, n_cycles=4, show_legs=None, filename="legs_test.png", show=True):
     """
-    CPG + legs with a fake test inhibition standing in for the intermediate layer:
-    one inhibitory spike per CPG spike, delivered at the CPG spike time (exc_delay
-    before the EPSP), with weight legs.inhibition_weight(m).
+    CPG + pattes, avec une inhibition de test qui remplace la couche intermédiaire :
+    un potentiel d'action inhibiteur par potentiel d'action du CPG, livré au moment de
+    celui-ci (exc_delay avant l'EPSP), de poids legs.inhibition_weight(m).
 
-    inhibition: {leg_index: (m_F, m_B)}, applied in both phases. Default: m_F spread
-                from 0 to N across legs, m_B = N - m_F.
-    Expected per half-cycle: N - m_F forward and N - m_B backward neurons fire
-    (lowest thresholds), D fires in stance, R in swing (after lift_delay).
+    inhibition : {indice_patte: (m_F, m_B)}, appliquée dans les deux phases. Par défaut :
+                 m_F réparti de 0 à N selon les pattes, m_B = N - m_F.
+    Attendu à chaque demi-cycle : N - m_F neurones avant et N - m_B neurones arrière
+    déchargent (seuils les plus bas d'abord), D décharge en appui, R en balancement
+    (après lift_delay).
     """
     cpg = CPG(period=config.CYCLE_PERIOD)
     legs = LegSet(cpg, n_legs=n_legs, n_motor=n_motor, tau_m=tau_m)
@@ -76,7 +78,7 @@ def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
     if show_legs is None:
         show_legs = [0, n_legs // 2]
 
-    # Temporary test inhibition (F and B groups only)
+    # Inhibition de test temporaire (groupes F et B seulement)
     m_test = np.zeros(len(legs.motors))
     for li, (m_f, m_b) in inhibition.items():
         s = legs.legs[li].start
@@ -91,14 +93,14 @@ def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
     v_start = legs.legs[show_legs[-1]].start + 2
     mon_v = StateMonitor(legs.motors, 'v', record=np.arange(v_start, v_start + n))
 
-    # margin so the last half-cycle (and its delayed R spike) is complete
+    # marge pour que le dernier demi-cycle (et son potentiel d'action R retardé) soit complet
     duration = n_cycles * cpg.period + legs.exc_delay + legs.lift_delay + 2 * defaultclock.dt
     net = Network(*cpg.objects, *legs.objects, test_inh, mon_cpg, mon_motor, mon_v)
-    print(f"Running CPG + {n_legs} legs: N={n}, tau_m={legs.tau_m}, "
+    print(f"Simulation CPG + {n_legs} pattes : N={n}, tau_m={legs.tau_m}, "
           f"exc_delay={legs.exc_delay}, lift_delay={legs.lift_delay}")
     net.run(duration)
 
-    # --- Checks ---------------------------------------------------------------
+    # --- Vérifications ----------------------------------------------------------
     on_t, on_p, counts, max_rank = legs.recruitment(mon_cpg, mon_motor)
     n_errors = 0
     for leg in legs.legs:
@@ -108,35 +110,35 @@ def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
             got = counts[:, leg.index, kind]
             ordered = np.array_equal(max_rank[:, leg.index, kind] + 1, got)
             n_errors += int(np.sum(got != expected)) + (0 if ordered else 1)
-            parts.append(f"{KIND_NAMES[kind]}: {got.tolist()} (exp {expected})"
-                         + ("" if ordered else " NOT lowest-first"))
+            parts.append(f"{KIND_NAMES[kind]} : {got.tolist()} (att. {expected})"
+                         + ("" if ordered else " seuils bas PAS en premier"))
         exp_d = (on_p == leg.phase).astype(int)
         rd_ok = (np.array_equal(counts[:, leg.index, LOWER], exp_d)
                  and np.array_equal(counts[:, leg.index, RAISE], 1 - exp_d))
         n_errors += 0 if rd_ok else 1
-        print(f"{leg.name} (stance {'AB'[leg.phase]}, m_F={m_f}, m_B={m_b}) | "
-              + " | ".join(parts) + f" | R/D {'OK' if rd_ok else 'WRONG'}")
-    print("All checks passed." if n_errors == 0 else f"{n_errors} check(s) FAILED.")
+        print(f"{leg.name} (appui {'AB'[leg.phase]}, m_F={m_f}, m_B={m_b}) | "
+              + " | ".join(parts) + f" | R/D {'OK' if rd_ok else 'FAUX'}")
+    print("Toutes les vérifications sont passées." if n_errors == 0 else f"{n_errors} vérification(s) en ÉCHEC.")
 
     vis.plot_legs(legs, mon_cpg, mon_motor, mon_v, show_legs, inhibition, duration,
                   filename=filename, show=show)
     return counts
 
 
-DEFAULT_TIMELINE = [  # (start time, speed, steer)
-    (0 * ms, 1.0, 0.0),       # forward 100 %
-    (1000 * ms, 0.5, 0.0),    # forward 50 %
-    (2000 * ms, 1.0, -0.5),   # forward 100 %, steer left 50 % -> left legs 50 %
-    (3000 * ms, 0.5, 0.4),    # forward 50 %, steer right 40 % -> right legs 30 %
-    (4000 * ms, 0.0, 0.0),    # stop
-    (5000 * ms, -0.7, 0.0),   # reverse 70 %
-    (6000 * ms, 0.0, -1.0),   # turn left on the spot, 100 %
-    (7000 * ms, -1.0, 0.5),   # reverse 100 %, steer right 50 %
+DEFAULT_TIMELINE = [  # (temps de début, vitesse, virage)
+    (0 * ms, 1.0, 0.0),       # avant 100 %
+    (1000 * ms, 0.5, 0.0),    # avant 50 %
+    (2000 * ms, 1.0, -0.5),   # avant 100 %, virage gauche 50 % -> pattes gauches à 50 %
+    (3000 * ms, 0.5, 0.4),    # avant 50 %, virage droite 40 % -> pattes droites à 30 %
+    (4000 * ms, 0.0, 0.0),    # arrêt
+    (5000 * ms, -0.7, 0.0),   # arrière 70 %
+    (6000 * ms, 0.0, -1.0),   # rotation sur place vers la gauche, 100 %
+    (7000 * ms, -1.0, 0.5),   # arrière 100 %, virage droite 50 %
 ]
 
 
 def timeline_command(timeline):
-    """command_fn(t) -> (speed, steer) from a list of (start time, speed, steer)."""
+    """command_fn(t) -> (vitesse, virage) à partir d'une liste de (temps de début, vitesse, virage)."""
     def command_fn(t):
         speed, steer = 0.0, 0.0
         for t_start, sp, st in timeline:
@@ -148,11 +150,11 @@ def timeline_command(timeline):
 
 def expected_recruitment(n, speed, steer, leg, in_stance):
     """
-    Expected number of fired neurons [R, D, F, B] of a leg in one half-cycle.
-    Walking: stroke = |speed| * (1 - steer of the leg's side) * N for the push (stance)
-    and the return (swing); R lifts as soon as |speed| * N > 1/2; D fires at every
-    stance onset (never braked).
-    Speed 0: turn on the spot, stroke |steer| * N, the side towards the turn in reverse.
+    Nombre attendu de neurones qui déchargent [R, D, F, B] pour une patte sur un demi-cycle.
+    En marche : amplitude = |vitesse| * (1 - virage du côté de la patte) * N pour la poussée
+    (appui) et le retour (balancement) ; R lève la patte dès que |vitesse| * N > 1/2 ;
+    D décharge à chaque début d'appui (jamais freiné).
+    Vitesse 0 : rotation sur place, amplitude |virage| * N, le côté vers lequel on tourne recule.
     """
     speed = float(np.clip(speed, -1, 1))
     steer = float(np.clip(steer, -1, 1))
@@ -167,19 +169,19 @@ def expected_recruitment(n, speed, steer, leg, in_stance):
     out = np.zeros(4, dtype=int)
     if in_stance:
         out[LOWER] = 1
-        out[FORWARD + direction] = stroke          # push: F forward, B reverse
+        out[FORWARD + direction] = stroke          # poussée : F en avant, B en arrière
     else:
         out[RAISE] = steps
-        out[FORWARD + 1 - direction] = stroke      # return: B forward, F reverse
+        out[FORWARD + 1 - direction] = stroke      # retour : B en avant, F en arrière
     return out
 
 
 def test_control(timeline=DEFAULT_TIMELINE, n_legs=config.N_LEGS, n_motor=config.N_MOTOR,
                  duration=8000 * ms, show_legs=None, filename="control_test.png", show=True):
     """
-    CPG + legs + intermediate layer + brain, driven by a scripted command timeline.
-    Checks the number of R, D, F, B neurons fired by every leg in every half-cycle.
-    Returns (legs, on_t, on_p, counts) as in LegSet.recruitment().
+    CPG + pattes + couche intermédiaire + cerveau, pilotés par un scénario de commandes.
+    Vérifie le nombre de neurones R, D, F, B qui déchargent pour chaque patte à chaque demi-cycle.
+    Renvoie (legs, on_t, on_p, counts) comme LegSet.recruitment().
     """
     cpg = CPG(period=config.CYCLE_PERIOD)
     legs = LegSet(cpg, n_legs=n_legs, n_motor=n_motor)
@@ -190,14 +192,14 @@ def test_control(timeline=DEFAULT_TIMELINE, n_legs=config.N_LEGS, n_motor=config
     mon_cpg = SpikeMonitor(cpg.neurons)
     mon_level = StateMonitor(layer.neurons, 'level', record=True)
     mon_motor = SpikeMonitor(legs.motors)
-    # margin so the last half-cycle (and its delayed R spike) is complete
+    # marge pour que le dernier demi-cycle (et son potentiel d'action R retardé) soit complet
     run_time = duration + legs.exc_delay + legs.lift_delay + 2 * defaultclock.dt
     net = Network(*cpg.objects, *legs.objects, *layer.objects, brain.driver(command_fn),
                   mon_cpg, mon_level, mon_motor)
-    print(f"Running CPG + {n_legs} legs + intermediate layer for {duration}")
+    print(f"Simulation CPG + {n_legs} pattes + couche intermédiaire pendant {duration}")
     net.run(run_time)
 
-    # --- Checks ---------------------------------------------------------------
+    # --- Vérifications ----------------------------------------------------------
     on_t, on_p, counts, _ = legs.recruitment(mon_cpg, mon_motor)
     n_errors = 0
     for c, (t, p) in enumerate(zip(on_t, on_p)):
@@ -207,10 +209,10 @@ def test_control(timeline=DEFAULT_TIMELINE, n_legs=config.N_LEGS, n_motor=config
             got = counts[c, leg.index]
             if not np.array_equal(got, expected):
                 n_errors += 1
-                print(f"  t={t:.0f} ms {leg.name}: got R,D,F,B={got.tolist()}, "
-                      f"expected {expected.tolist()} (speed={speed}, steer={steer})")
-    print(f"{len(on_t)} half-cycles x {n_legs} legs checked: "
-          + ("all checks passed." if n_errors == 0 else f"{n_errors} FAILED."))
+                print(f"  t={t:.0f} ms {leg.name} : obtenu R,D,F,B={got.tolist()}, "
+                      f"attendu {expected.tolist()} (vitesse={speed}, virage={steer})")
+    print(f"{len(on_t)} demi-cycles x {n_legs} pattes vérifiés : "
+          + ("toutes les vérifications sont passées." if n_errors == 0 else f"{n_errors} en ÉCHEC."))
 
     vis.plot_control(layer, mon_cpg, mon_level, mon_motor, command_fn, counts, run_time,
                      show_legs=show_legs, filename=filename, show=show)
@@ -218,20 +220,20 @@ def test_control(timeline=DEFAULT_TIMELINE, n_legs=config.N_LEGS, n_motor=config
 
 
 def test_body(timeline=DEFAULT_TIMELINE, duration=8000 * ms, animate=True, show=True):
-    """Full chain (test_control), then the top view of the body moved by its stance legs."""
+    """Chaîne complète (test_control), puis vue de dessus du corps déplacé par ses pattes en appui."""
     legs, on_t, on_p, counts = test_control(timeline, duration=duration, show=False)
     body = Body(legs)
     times, poses, feet_states = body.trajectory(on_t, on_p, counts)
     command_fn = timeline_command(timeline)
 
-    print("Pose at each command change (x, y in m, heading in deg, 90 = start):")
+    print("Pose à chaque changement de commande (x, y en m, cap en degrés, 90 = départ) :")
     for t_start, speed, steer in timeline:
         k = np.searchsorted(times, float(t_start / ms))
         x, y, h = poses[k]
-        print(f"  {float(t_start / ms):6.0f} ms  speed {speed:+.1f} steer {steer:+.1f} -> "
-              f"x={x:+.3f} y={y:+.3f} heading={np.degrees(h):6.1f}")
+        print(f"  {float(t_start / ms):6.0f} ms  vitesse {speed:+.1f} virage {steer:+.1f} -> "
+              f"x={x:+.3f} y={y:+.3f} cap={np.degrees(h):6.1f}")
     x, y, h = poses[-1]
-    print(f"  end {times[-1]:6.0f} ms -> x={x:+.3f} y={y:+.3f} heading={np.degrees(h):6.1f}")
+    print(f"  fin {times[-1]:6.0f} ms -> x={x:+.3f} y={y:+.3f} cap={np.degrees(h):6.1f}")
 
     vis.plot_trajectory(body, times, poses, command_fn, show=show and not animate)
     if animate:
@@ -240,7 +242,7 @@ def test_body(timeline=DEFAULT_TIMELINE, duration=8000 * ms, animate=True, show=
 
 
 def _front_gap(robot, pose):
-    """Shortest front sensor distance (m) at a pose."""
+    """Plus petite distance (m) mesurée par les capteurs avant à une pose."""
     return float(robot.sensors.rays(pose)[2][:2].min())
 
 
@@ -252,87 +254,87 @@ def _run_scenario(world, timeline, duration, start=(0.0, 0.0, np.pi / 2)):
 
 def test_sensors(animate=True, show=True):
     """
-    Sensor reflexes, scripted (the robot starts at (0, 0) facing up):
-      1. wall ahead, full forward: brakes, then yoyos (back-off) without touching it
-      2. wall behind, full reverse: same, yoyo forward
-      3. wall inside the back-off zone, spin on the spot: sensors gated off,
-         the spin is exactly the one without obstacle
-      4. wall inside the back-off zone, stop: sensors gated off, does not move
-      5. corridor, start off-centre, full forward: the side sensors centre the robot
-    Scenario 1 is also plotted (and animated).
+    Réflexes des capteurs, scénarisés (le robot part de (0, 0) orienté vers le haut) :
+      1. mur devant, pleine vitesse avant : freine, puis va-et-vient (recul) sans le toucher
+      2. mur derrière, pleine vitesse arrière : pareil, va-et-vient vers l'avant
+      3. mur dans la zone de recul, rotation sur place : capteurs coupés, la rotation
+         est exactement celle obtenue sans obstacle
+      4. mur dans la zone de recul, arrêt : capteurs coupés, le robot ne bouge pas
+      5. couloir, départ décentré, pleine vitesse avant : les capteurs latéraux recentrent le robot
+    Le scénario 1 est aussi tracé (et animé).
     """
     results = []
 
     def yoyo(robot, world):
-        """(touched the wall, number of direction changes along y)."""
+        """(mur touché, nombre de changements de sens selon y)."""
         poses = np.array(robot.poses)
         dy = np.diff(poses[:, 1])
         moves = np.sign(dy[np.abs(dy) > 1e-6])
         hit = any(world.overlaps(np.vstack([robot.body.outline(p), p[:2]])) for p in poses)
         return hit, int(np.sum(moves[1:] != moves[:-1]))
 
-    # 1. wall ahead
+    # 1. mur devant
     world = World([(-0.5, 1.0, 0.5, 1.2)])
     timeline = [(0 * ms, 1.0, 0.0)]
     robot = _run_scenario(world, timeline, 8000 * ms)
     times, poses, feet_states = robot.trajectory()
     gaps = np.array([_front_gap(robot, p) for p in poses])
     hit, reversals = yoyo(robot, world)
-    results.append(("wall ahead, forward: no contact, yoyo",
+    results.append(("mur devant, marche avant : pas de contact, va-et-vient",
                     not hit and reversals >= 4,
-                    f"min gap {gaps.min():.3f} m, {reversals} direction changes"))
+                    f"écart min {gaps.min():.3f} m, {reversals} changements de sens"))
     if animate or show:
         vis.plot_trajectory(robot.body, times, poses, timeline_command(timeline),
                             filename="sensors_wall.png", show=False, world=world,
-                            title="Sensors: full forward towards a wall (back-off yoyo)")
+                            title="Capteurs : pleine vitesse vers un mur (va-et-vient de recul)")
     if animate:
         vis.animate_body(robot.body, times, poses, feet_states, timeline_command(timeline),
                          filename="sensors_wall.gif", show=False, world=world,
                          sensors=robot.sensors)
 
-    # 2. wall behind
+    # 2. mur derrière
     world = World([(-0.5, -1.0, 0.5, -0.8)])
     robot = _run_scenario(world, [(0 * ms, -1.0, 0.0)], 8000 * ms)
     hit, reversals = yoyo(robot, world)
     rear_gap = min(float(robot.sensors.rays(p)[2][2:4].min()) for p in robot.poses)
-    results.append(("wall behind, reverse: no contact, yoyo", not hit and reversals >= 4,
-                    f"min rear gap {rear_gap:.3f} m, {reversals} direction changes"))
+    results.append(("mur derrière, marche arrière : pas de contact, va-et-vient", not hit and reversals >= 4,
+                    f"écart arrière min {rear_gap:.3f} m, {reversals} changements de sens"))
 
-    # 3. spin inside the back-off zone (nose at y = 0.15, wall at 0.25), compared with
-    #    the same spin without the wall
+    # 3. rotation dans la zone de recul (nez à y = 0,15, mur à 0,25), comparée à
+    #    la même rotation sans le mur
     world = World([(-0.5, 0.25, 0.5, 0.45)])
     spin = [(0 * ms, 0.0, -1.0)]
     poses = np.array(_run_scenario(world, spin, 2000 * ms).poses)
     free = np.array(_run_scenario(World([]), spin, 2000 * ms).poses)
     ok = len(poses) == len(free) and np.allclose(poses, free, atol=1e-9)
-    results.append(("spin next to a wall: sensors gated off", ok,
-                    f"turned {np.degrees(poses[-1, 2] - poses[0, 2]):.1f} deg "
-                    f"(without wall {np.degrees(free[-1, 2] - free[0, 2]):.1f}), "
-                    f"moved {np.linalg.norm(poses[-1, :2] - poses[0, :2]):.4f} m"))
+    results.append(("rotation près d'un mur : capteurs coupés", ok,
+                    f"rotation de {np.degrees(poses[-1, 2] - poses[0, 2]):.1f} deg "
+                    f"(sans mur {np.degrees(free[-1, 2] - free[0, 2]):.1f}), "
+                    f"déplacement {np.linalg.norm(poses[-1, :2] - poses[0, :2]):.4f} m"))
 
-    # 4. stop inside the back-off zone
+    # 4. arrêt dans la zone de recul
     robot = _run_scenario(world, [(0 * ms, 0.0, 0.0)], 2000 * ms)
     poses = np.array(robot.poses)
     moved = float(np.max(np.abs(poses - poses[0])))
-    results.append(("stop in the back-off zone: sensors gated off, does not move",
-                    moved == 0.0, f"front gap {_front_gap(robot, poses[0]):.3f} m, "
-                                  f"largest pose change {moved:.4f}"))
+    results.append(("arrêt dans la zone de recul : capteurs coupés, ne bouge pas",
+                    moved == 0.0, f"écart avant {_front_gap(robot, poses[0]):.3f} m, "
+                                  f"plus grand changement de pose {moved:.4f}"))
 
-    # 5. corridor 0.5 m wide, start 8 cm off-centre: the side sensors centre the robot
+    # 5. couloir de 0,5 m de large, départ décentré de 8 cm : les capteurs latéraux recentrent le robot
     world = World([(-0.55, 0.2, -0.25, 2.0), (0.25, 0.2, 0.55, 2.0)])
     robot = _run_scenario(world, [(0 * ms, 1.0, 0.0)], 6000 * ms, start=(-0.08, 0.0, np.pi / 2))
     poses = np.array(robot.poses)
-    inside = poses[:, 1] > 0.6                        # well inside the corridor
+    inside = poses[:, 1] > 0.6                        # bien à l'intérieur du couloir
     hit = any(world.overlaps(np.vstack([robot.body.outline(p), p[:2]])) for p in poses)
     off = np.abs(poses[inside, 0])
-    results.append(("corridor, forward: no contact, centred", not hit and off[-4:].max() < 0.04,
-                    f"off-centre 0.080 -> max {off.max():.3f}, last {off[-1]:.3f} m"))
+    results.append(("couloir, marche avant : pas de contact, centré", not hit and off[-4:].max() < 0.04,
+                    f"décentrage 0.080 -> max {off.max():.3f}, dernier {off[-1]:.3f} m"))
 
-    print("Sensor reflexes:")
+    print("Réflexes des capteurs :")
     for name, ok, detail in results:
-        print(f"  [{'OK' if ok else 'FAILED'}] {name}: {detail}")
-    print("All sensor checks passed." if all(ok for _, ok, _ in results)
-          else "Some sensor checks FAILED.")
+        print(f"  [{'OK' if ok else 'ÉCHEC'}] {name} : {detail}")
+    print("Toutes les vérifications des capteurs sont passées." if all(ok for _, ok, _ in results)
+          else "Certaines vérifications des capteurs ont ÉCHOUÉ.")
     if show:
         import matplotlib.pyplot as plt
         plt.show()

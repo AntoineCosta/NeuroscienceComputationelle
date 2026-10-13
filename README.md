@@ -74,7 +74,7 @@ python main.py
 
 Par défaut, `main.py` lance `test_sensors()`. Les autres tests sont en commentaire dans le
 bloc `if __name__ == '__main__':` (voir [Tests](#tests)). Les figures et animations sont
-enregistrées dans le dossier courant (`*.png`, `*.gif`).
+enregistrées dans le dossier `graphs/` (`*.png`, `*.gif`).
 
 ## Organisation des fichiers
 
@@ -92,11 +92,11 @@ enregistrées dans le dossier courant (`*.png`, `*.gif`).
 | `manual.py` | Pilotage en direct (manette / clavier), affichage temps réel |
 | `visualisation.py` | Toutes les figures et animations (les classes de simulation n'en contiennent pas) |
 | `main.py` | Tests scriptés avec vérifications automatiques |
-| `Graph_neurons.jpg` | Schéma du réseau |
+| `graphs/` | Figures et animations générées, et `Graph_neurons.jpg` (schéma du réseau) |
 
 ## Le réseau de neurones
 
-![Schéma du réseau](Graph_neurons.jpg)
+![Schéma du réseau](graphs/Graph_neurons.jpg)
 
 Correspondance entre les noms du schéma et ceux du code :
 

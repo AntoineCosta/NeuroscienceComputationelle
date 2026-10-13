@@ -1,31 +1,31 @@
-"""Global configuration of the hexapod simulation, shared by all modules."""
+"""Configuration globale de la simulation de l'hexapode, partagée par tous les modules."""
 from brian2 import ms, prefs, defaultclock
 
-N_LEGS = 6                 # Number of legs: even, 6 <= N_LEGS <= 200
-N_MOTOR = 10               # Neurons per forward/backward motor group (stroke resolution)
-CYCLE_PERIOD = 500 * ms    # Full CPG cycle (phase A + phase B), fixed rhythm
-TAU_M = 20 * ms            # Membrane time constant of the leg motor neurons
-EXC_DELAY = 2 * ms         # CPG -> motor excitation delay (inhibition arrives first)
-LIFT_DELAY = 10 * ms       # Raise (R) delay after swing onset (other tripod touching down)
+N_LEGS = 6                 # Nombre de pattes : pair, 6 <= N_LEGS <= 200
+N_MOTOR = 10               # Neurones par groupe moteur avant / arrière (résolution du pas)
+CYCLE_PERIOD = 500 * ms    # Cycle complet du CPG (phase A + phase B), rythme fixe
+TAU_M = 20 * ms            # Constante de temps membranaire des motoneurones
+EXC_DELAY = 2 * ms         # Délai d'excitation CPG -> motoneurones (l'inhibition arrive avant)
+LIFT_DELAY = 10 * ms       # Retard du lever (R) après le début du balancement (l'autre trépied se pose d'abord)
 
-# Body geometry, top view (metres) - kinematics and visualisation only
+# Géométrie du corps, vue de dessus (mètres) - cinématique et affichage uniquement
 BODY_LENGTH = 0.30
 BODY_WIDTH = 0.15
-TRACK_WIDTH = 0.25         # Distance between the left and right feet
-STRIDE = 0.06              # Body displacement of a full stance stroke (N neurons fired)
+TRACK_WIDTH = 0.25         # Écart entre les pieds gauches et droits
+STRIDE = 0.06              # Déplacement du corps pour un appui complet (N neurones déchargent)
 
-# World and distance sensors (metres) - world.py, sensors.py
-ARENA_SIZE = 4.0           # Square arena, walls at +-ARENA_SIZE / 2
-SENSOR_ANGLE = 20          # Degrees: front sensors at +-angle, rear ones at 180 -+ angle
-FRONT_RANGE = 0.6          # Front sensors brake forward walking from this distance
-REAR_RANGE = 0.4           # Rear sensors brake reverse walking from this distance
-SIDE_RANGE = 0.3           # Side sensors (+-90 deg) steer away from this distance
-CONTACT_MARGIN = 0.05      # Brakes are full at this distance (not only at contact)
-BACKOFF_DISTANCE = 0.2     # Front obstacle closer than this: walk backward (reflex)
-BACKOFF_RAMP = 0.02        # The back-off goes from 0 to full over this distance
-STEER_GAIN = 1.0           # Turn-away strength (difference between the front sensors)
-SIDE_STEER_GAIN = 1.0      # Turn-away strength (difference between the side sensors)
-SENSE_DT = 10 * ms         # Sensor and odometry update period
+# Monde et capteurs de distance (mètres) - world.py, sensors.py
+ARENA_SIZE = 4.0           # Arène carrée, murs à +-ARENA_SIZE / 2
+SENSOR_ANGLE = 20          # Degrés : capteurs avant à +-angle, arrière à 180 -+ angle
+FRONT_RANGE = 0.6          # Les capteurs avant freinent la marche avant à partir de cette distance
+REAR_RANGE = 0.4           # Les capteurs arrière freinent la marche arrière à partir de cette distance
+SIDE_RANGE = 0.3           # Les capteurs latéraux (+-90 deg) font tourner à partir de cette distance
+CONTACT_MARGIN = 0.05      # Freinage maximal dès cette distance (pas seulement au contact)
+BACKOFF_DISTANCE = 0.2     # Obstacle devant plus proche que ça : marche arrière (réflexe)
+BACKOFF_RAMP = 0.02        # Le recul passe de 0 au maximum sur cette distance
+STEER_GAIN = 1.0           # Force du virage d'évitement (différence entre capteurs avant)
+SIDE_STEER_GAIN = 1.0      # Force du virage d'évitement (différence entre capteurs latéraux)
+SENSE_DT = 10 * ms         # Période de mise à jour des capteurs et de l'odométrie
 
 prefs.codegen.target = 'numpy'
 defaultclock.dt = 0.5 * ms

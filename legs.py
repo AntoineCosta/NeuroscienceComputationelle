@@ -1,28 +1,28 @@
-"""Leg motor neurons: raise (R), lower (D), forward (F) and backward (B) groups."""
+"""Motoneurones des pattes : groupes lever (R), poser (D), avant (F) et arrière (B)."""
 from brian2 import *
 import numpy as np
 
 from config import N_LEGS, N_MOTOR, TAU_M, EXC_DELAY, LIFT_DELAY
 
-# Motor neuron kinds
+# Types de motoneurones
 RAISE, LOWER, FORWARD, BACKWARD = 0, 1, 2, 3
 KIND_NAMES = ['R', 'D', 'F', 'B']
 
 
 class Leg:
     """
-    View on the motor neurons of one leg (owns no Brian2 object).
+    Vue sur les motoneurones d'une patte (ne possède aucun objet Brian2).
 
-    Block layout inside the shared motor NeuronGroup:
+    Disposition du bloc dans le NeuronGroup moteur partagé :
         [R, D, F_0 .. F_{N-1}, B_0 .. B_{N-1}]
     """
 
     def __init__(self, motors, index, n_motor, n_legs):
         per_side = n_legs // 2
         self.index = index
-        self.side = 0 if index < per_side else 1        # 0 = left, 1 = right
-        self.rank = index % per_side                     # 0 = front leg
-        self.phase = (self.rank + self.side) % 2         # CPG neuron driving its stance
+        self.side = 0 if index < per_side else 1        # 0 = gauche, 1 = droite
+        self.rank = index % per_side                     # 0 = patte avant
+        self.phase = (self.rank + self.side) % 2         # neurone du CPG qui pilote son appui
         self.name = f"{'LR'[self.side]}{self.rank + 1}"
 
         self.start = index * (2 + 2 * n_motor)
@@ -33,41 +33,42 @@ class Leg:
         self.backward = motors[s + 2 + n_motor:s + 2 + 2 * n_motor]
 
     def __repr__(self):
-        return f"Leg({self.name}, stance phase {'AB'[self.phase]})"
+        return f"Leg({self.name}, phase d'appui {'AB'[self.phase]})"
 
 
 class LegSet:
     """
-    All leg motor neurons, driven by the CPG.
+    Tous les motoneurones des pattes, pilotés par le CPG.
 
-    Motor neuron: LIF (v relative to rest), thresholds evenly spaced:
-        theta_k = (k + 1/2) * u     (R and D: theta_0)
-    Each CPG spike gives a single EPSP of N*u to its F/B targets, so without inhibition
-    all N neurons of a group fire (once, all together). An inhibitory spike arriving
-    just before lowers v by m*u at the EPSP time: only the N - m lowest thresholds
-    are reached. The inhibitory weight is given by inhibition_weight(m).
+    Motoneurone : LIF (v relatif au repos), seuils régulièrement espacés :
+        theta_k = (k + 1/2) * u     (R et D : theta_0)
+    Chaque potentiel d'action du CPG donne un seul EPSP de N*u à ses cibles F/B : sans
+    inhibition, les N neurones d'un groupe déchargent (une fois, tous ensemble). Une
+    inhibition arrivant juste avant abaisse v de m*u au moment de l'EPSP : seuls les
+    N - m seuils les plus bas sont atteints. Le poids inhibiteur est donné par
+    inhibition_weight(m).
 
-    CPG wiring, for a leg whose stance is CPG phase p:
-      - D (lower) <- CPG p (stance onset)
-      - R (raise) <- CPG 1-p (swing onset), delayed by lift_delay
-      - F and B   <- both CPG neurons (direction selected by the intermediate layer)
-    R gets an EPSP of 2N*u: it is braked by both direction intermediates (forward and
-    reverse), so the leg lifts as soon as either direction has some speed.
-    D gets N*u and is never braked: every stance onset puts the foot down, so at stop
-    all feet end up on the ground (lowering a foot already down changes nothing).
+    Câblage du CPG, pour une patte dont l'appui correspond à la phase p du CPG :
+      - D (poser) <- CPG p (début de l'appui)
+      - R (lever) <- CPG 1-p (début du balancement), retardé de lift_delay
+      - F et B    <- les deux neurones du CPG (direction choisie par la couche intermédiaire)
+    R reçoit un EPSP de 2N*u : il est freiné par les deux intermédiaires de direction
+    (avant et arrière), donc la patte se lève dès qu'une direction a une vitesse non nulle.
+    D reçoit N*u et n'est jamais freiné : chaque début d'appui pose le pied, donc à
+    l'arrêt tous les pieds finissent au sol (poser un pied déjà posé ne change rien).
     """
 
     def __init__(self, cpg, n_legs=N_LEGS, n_motor=N_MOTOR, tau_m=TAU_M,
                  exc_delay=EXC_DELAY, lift_delay=LIFT_DELAY, u=1*mV, t_ref=2*ms):
         if n_legs % 2 or not 6 <= n_legs <= 200:
-            raise ValueError("n_legs must be even and between 6 and 200")
+            raise ValueError("n_legs doit être pair et compris entre 6 et 200")
         if not defaultclock.dt <= exc_delay < cpg.period / 2:
-            raise ValueError("exc_delay must be between dt and half a period")
+            raise ValueError("exc_delay doit être compris entre dt et une demi-période")
         if lift_delay + exc_delay >= cpg.period / 2:
-            raise ValueError("lift_delay + exc_delay must be shorter than half a period")
+            raise ValueError("lift_delay + exc_delay doit être plus court qu'une demi-période")
         if tau_m > cpg.period / 20:
-            print(f"WARNING: tau_m={tau_m} is long compared with the half-cycle: motor neurons "
-                  f"do not return to rest between CPG spikes, recruitment will be wrong.")
+            print(f"ATTENTION : tau_m={tau_m} est long par rapport au demi-cycle : les motoneurones "
+                  f"ne reviennent pas au repos entre deux potentiels d'action du CPG, le recrutement sera faux.")
         self.cpg = cpg
         self.n_legs = n_legs
         self.n_motor = n = n_motor
@@ -77,7 +78,7 @@ class LegSet:
         self.u = u
         block = 2 + 2 * n
 
-        # --- Per-neuron constants -------------------------------------------------
+        # --- Constantes par neurone ------------------------------------------------
         theta = (np.arange(n) + 0.5) * float(u / volt)
         kind = np.array([RAISE, LOWER] + [FORWARD] * n + [BACKWARD] * n)
         rank = np.array([0, 0] + list(range(n)) * 2)
@@ -91,8 +92,8 @@ class LegSet:
         kind : integer (constant)
         rank : integer (constant)
         leg : integer (constant)
-        side : integer (constant)   # 0 = left, 1 = right
-        phase : integer (constant)  # CPG neuron driving this leg's stance
+        side : integer (constant)   # 0 = gauche, 1 = droite
+        phase : integer (constant)  # neurone du CPG qui pilote l'appui de cette patte
         '''
         self.motors = NeuronGroup(n_legs * block, model=self.eqs, threshold='v > v_th',
                                   reset='v = 0*volt', refractory=t_ref, method='exact',
@@ -106,9 +107,9 @@ class LegSet:
 
         self.legs = [Leg(self.motors, i, n, n_legs) for i in range(n_legs)]
 
-        # --- CPG excitation: one EPSP of N*u (F/B/D) or 2N*u (R) per CPG spike -------
-        # v leaks for one step between the synaptic jump and the threshold test:
-        # the weight compensates it so v = N*u (2N*u) exactly when tested.
+        # --- Excitation par le CPG : un EPSP de N*u (F/B/D) ou 2N*u (R) par potentiel d'action
+        # v fuit pendant un pas entre le saut synaptique et le test du seuil :
+        # le poids compense cette fuite pour avoir v = N*u (2N*u) exactement au test.
         self.excitation = Synapses(cpg.neurons, self.motors, model='w : volt (constant)',
                                    on_pre='v_post += w')
         self.excitation.connect(condition=f'kind_post >= {FORWARD} '
@@ -121,30 +122,30 @@ class LegSet:
 
     @property
     def objects(self):
-        """Brian2 objects to add to a Network (CPG not included)."""
+        """Objets Brian2 à ajouter à un Network (CPG non inclus)."""
         return [self.motors, self.excitation]
 
     def input_delay(self, syn, base_delay):
-        """Per-synapse delay array: base_delay, + lift_delay for R targets."""
+        """Tableau des délais par synapse : base_delay, + lift_delay pour les cibles R."""
         is_raise = np.asarray(self.motors.kind[:])[np.asarray(syn.j[:])] == RAISE
         return (float(base_delay / second)
                 + np.where(is_raise, float(self.lift_delay / second), 0.0)) * second
 
     def inhibition_weight(self, m, lead=None):
         """
-        Weight of ONE spike shifting a group's potential by m threshold steps at the
-        CPG EPSP time: as an inhibition it silences the m highest thresholds (m = N
-        silences everything, R/D included); as an excitation it cancels m steps of
-        inhibition. m may be fractional (recruitment rounds to the nearest step).
-        lead: time between the spike's arrival and the CPG EPSP
-        (default: exc_delay, i.e. arriving at the CPG spike time).
+        Poids d'UN potentiel d'action qui décale le potentiel d'un groupe de m paliers de
+        seuil au moment de l'EPSP du CPG : en inhibition, il fait taire les m seuils les
+        plus hauts (m = N fait tout taire, R/D compris) ; en excitation, il annule m paliers
+        d'inhibition. m peut être fractionnaire (le recrutement arrondit au palier le plus proche).
+        lead : temps entre l'arrivée du potentiel d'action et l'EPSP du CPG
+        (par défaut : exc_delay, c.-à-d. une arrivée au moment du potentiel d'action du CPG).
         """
         lead = self.exc_delay if lead is None else lead
-        # decays during `lead`, plus the one step before the threshold test
+        # fuite pendant `lead`, plus le pas qui précède le test du seuil
         return m * self.u * np.exp(float((lead + defaultclock.dt) / self.tau_m))
 
     def spike_counts(self, indices):
-        """[leg, kind] number of spikes of the given motor neuron indices (live use)."""
+        """[patte, type] nombre de potentiels d'action des motoneurones donnés (usage en direct)."""
         indices = np.asarray(indices, dtype=int)
         counts = np.zeros((self.n_legs, 4), dtype=int)
         np.add.at(counts, (np.asarray(self.motors.leg[:])[indices],
@@ -153,15 +154,15 @@ class LegSet:
 
     def recruitment(self, mon_cpg, mon_motor):
         """
-        Count the motor neurons fired in each CPG half-cycle.
+        Compte les motoneurones qui ont déchargé à chaque demi-cycle du CPG.
 
-        Returns (on_t, on_p, counts, max_rank):
-          on_t     : CPG spike times (ms), one per half-cycle
-          on_p     : CPG phase (0 = A, 1 = B) of each half-cycle
-          counts   : [half-cycle, leg, kind] number of neurons fired
-          max_rank : [half-cycle, leg, kind] highest rank fired (-1 if none)
+        Renvoie (on_t, on_p, counts, max_rank) :
+          on_t     : temps des potentiels d'action du CPG (ms), un par demi-cycle
+          on_p     : phase du CPG (0 = A, 1 = B) de chaque demi-cycle
+          counts   : [demi-cycle, patte, type] nombre de neurones qui ont déchargé
+          max_rank : [demi-cycle, patte, type] rang le plus haut qui a déchargé (-1 si aucun)
         """
-        # plain numpy copies (Brian2 views do not support fancy indexing with repeats)
+        # copies numpy simples (les vues Brian2 ne gèrent pas l'indexation avancée avec répétitions)
         kind_arr = np.asarray(self.motors.kind[:])
         leg_arr = np.asarray(self.motors.leg[:])
         rank_arr = np.asarray(self.motors.rank[:])
@@ -171,7 +172,7 @@ class LegSet:
         on_t, on_p = cpg_t[order], np.asarray(mon_cpg.i[:])[order]
         half_ms = float(self.cpg.period / 2 / ms)
 
-        # Shift each motor spike back to the CPG spike that caused it
+        # Ramène chaque potentiel d'action moteur au potentiel d'action du CPG qui l'a causé
         idx = np.asarray(mon_motor.i[:])
         t_eff = (np.asarray(mon_motor.t / ms) - float(self.exc_delay / ms)
                  - np.where(kind_arr[idx] == RAISE, float(self.lift_delay / ms), 0.0))

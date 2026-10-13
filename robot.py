@@ -1,4 +1,4 @@
-"""Robot: the whole closed loop (network, body, world, sensors), for live and scripted runs."""
+"""Robot : la boucle fermée complète (réseau, corps, monde, capteurs), en direct ou scénarisée."""
 import numpy as np
 from brian2 import Network, SpikeMonitor, network_operation, ms
 
@@ -14,17 +14,17 @@ from sensors import Sensors
 
 class Robot:
     """
-    CPG + legs + intermediates + brain, the body moved by the motor spikes, and the
-    distance sensors reading the world at the current body pose.
+    CPG + pattes + intermédiaires + cerveau, le corps déplacé par les potentiels d'action
+    des motoneurones, et les capteurs de distance qui lisent le monde à la pose courante.
 
-    command_fn(t) -> (speed, steer): scripted timeline or live controller.
-    world: World (default layout) or None for no obstacles and no sensors.
+    command_fn(t) -> (vitesse, virage) : scénario ou pilotage en direct.
+    world : World (disposition par défaut) ou None pour aucun obstacle et aucun capteur.
 
-    Closed loop, every SENSE_DT:
-      - odometry: once all motor spikes of the latest half-cycle are in
-        (exc_delay + lift_delay after its CPG spike), the body moves by that
-        half-cycle's push, spread over the half-cycle (pose_at)
-      - sensors: distances measured at the current pose -> sensor neurons
+    Boucle fermée, tous les SENSE_DT :
+      - odométrie : une fois tous les potentiels d'action moteurs du dernier demi-cycle
+        arrivés (exc_delay + lift_delay après le potentiel d'action du CPG), le corps
+        avance de la poussée de ce demi-cycle, étalée sur le demi-cycle (pose_at)
+      - capteurs : distances mesurées à la pose courante -> neurones capteurs
     """
 
     def __init__(self, command_fn, world=None, n_legs=config.N_LEGS, n_motor=config.N_MOTOR,
@@ -42,9 +42,11 @@ class Robot:
         self.mon_cpg = SpikeMonitor(self.cpg.neurons)
         self.mon_motor = SpikeMonitor(self.legs.motors)
         self.half_ms = float(self.cpg.period / 2 / ms)
-        # all motor spikes caused by a CPG spike are in after this time (R is the last one)
+        # tous les potentiels d'action moteurs dus à un potentiel d'action du CPG sont
+        # arrivés après ce temps (R est le dernier)
         self.settle_ms = float((self.legs.exc_delay + self.legs.lift_delay) / ms) + 1
-        # log: CPG spike time of each push, pose after it (first pose: start), feet states
+        # historique : temps du potentiel d'action du CPG de chaque poussée, pose après
+        # celle-ci (première pose : départ), état des pieds
         self.push_times, self.poses, self.feet_states = [], [self.body.pose.copy()], []
         self._n_motor_seen = self._n_cpg_seen = 0
 
@@ -62,7 +64,7 @@ class Robot:
         self.net = Network(*objects)
 
     def odometry(self, t_ms):
-        """Move the body by the latest half-cycle, once all its motor spikes are in."""
+        """Déplace le corps selon le dernier demi-cycle, une fois tous ses potentiels d'action moteurs arrivés."""
         if self.mon_cpg.num_spikes == self._n_cpg_seen:
             return
         t_cpg = float(np.asarray(self.mon_cpg.t / ms)[-1])
@@ -76,14 +78,14 @@ class Robot:
         self.feet_states.append(self.body.feet_state())
 
     def pose_at(self, t_ms):
-        """Body pose at t_ms: the latest push spread linearly over its half-cycle."""
+        """Pose du corps à t_ms : la dernière poussée étalée linéairement sur son demi-cycle."""
         if not self.push_times:
             return self.poses[0]
         a = np.clip((t_ms - self.push_times[-1]) / self.half_ms, 0, 1)
         return self.poses[-2] + a * (self.poses[-1] - self.poses[-2])
 
     def feet_at(self, t_ms, pose):
-        """Drawn legs (hips, feet, raised) at t_ms and pose."""
+        """Pattes dessinées (hanches, pieds, levés) à t_ms et à la pose donnée."""
         t_in = t_ms - self.push_times[-1] if self.push_times else self.half_ms
         return self.body.feet(pose, t_in)
 
@@ -91,6 +93,6 @@ class Robot:
         self.net.run(duration)
 
     def trajectory(self):
-        """(times, poses, feet_states) in the format of Body.trajectory()."""
+        """(times, poses, feet_states) au même format que Body.trajectory()."""
         times = np.append(self.push_times, self.push_times[-1] + self.half_ms)
         return times, np.array(self.poses), self.feet_states
