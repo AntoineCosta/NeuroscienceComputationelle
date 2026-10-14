@@ -2,7 +2,7 @@
 import numpy as np
 from brian2 import network_operation
 
-from intermediates import I_FWD_L, I_FWD_R, I_REV_L, I_REV_R, I_STEER_L, I_STEER_R
+from hexapode.reseau.intermediates import I_FWD_L, I_FWD_R, I_REV_L, I_REV_R, I_STEER_L, I_STEER_R
 
 
 class Brain:

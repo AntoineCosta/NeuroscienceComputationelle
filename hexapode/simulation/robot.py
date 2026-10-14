@@ -2,14 +2,14 @@
 import numpy as np
 from brian2 import Network, SpikeMonitor, network_operation, ms
 
-import config
-from CPG import CPG
-from legs import LegSet
-from intermediates import IntermediateLayer
-from brain import Brain
-from body import Body
-from world import World
-from sensors import Sensors
+from hexapode import config
+from hexapode.reseau.CPG import CPG
+from hexapode.reseau.legs import LegSet
+from hexapode.reseau.intermediates import IntermediateLayer
+from hexapode.simulation.brain import Brain
+from hexapode.simulation.body import Body
+from hexapode.simulation.world import World
+from hexapode.reseau.sensors import Sensors
 
 
 class Robot:

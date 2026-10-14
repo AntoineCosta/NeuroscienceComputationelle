@@ -5,16 +5,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from brian2 import ms, mV
 
-from legs import RAISE, LOWER, FORWARD, BACKWARD, KIND_NAMES
+from hexapode.reseau.legs import RAISE, LOWER, FORWARD, BACKWARD, KIND_NAMES
 
 KIND_COLORS = ['green', 'saddlebrown', 'blue', 'red']
-GRAPH_DIR = "graphs"
+# dossier graphs/ à la racine du projet, quel que soit le dossier de lancement
+GRAPH_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "graphs"))
 
 
 def _out_path(filename):
-    """Chemin d'un fichier de sortie dans GRAPH_DIR (créé si besoin)."""
-    os.makedirs(GRAPH_DIR, exist_ok=True)
-    return os.path.join(GRAPH_DIR, filename)
+    """Chemin d'un fichier de sortie dans GRAPH_DIR (sous-dossiers compris, créés si besoin)."""
+    path = os.path.join(GRAPH_DIR, filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
 
 
 def _finish(filename, show):
@@ -125,7 +127,7 @@ def plot_legs(legs, mon_cpg, mon_motor, mon_v, show_legs, inhibition, duration,
         ax.axhline(th, color='grey', linestyle=':', linewidth=0.7)
     ax.axvline(t0, color='k', linestyle='--', linewidth=0.8, label="Potentiel d'action du CPG (+ inhibition)")
     ax.axvline(t0 + float(legs.exc_delay / ms), color='orange', linestyle='--', linewidth=0.8,
-               label='EPSP du CPG')
+               label='Excitation du CPG')
     ax.set_title(f"Potentiels du groupe F, patte {v_leg.name} (pointillés : seuils, couleur : rang)")
     ax.set_ylabel('v (mV)')
     ax.set_xlabel('Temps (ms)')
@@ -141,7 +143,7 @@ def plot_control(layer, mon_cpg, mon_level, mon_motor, command_fn, counts, durat
     et raster moteur des pattes de show_legs.
     counts : [demi-cycle, patte, type], sortie de LegSet.recruitment().
     """
-    from intermediates import INTER_NAMES
+    from hexapode.reseau.intermediates import INTER_NAMES
     legs = layer.legs
     n = legs.n_motor
     end_ms = float(duration / ms)
@@ -360,6 +362,134 @@ def animate_body(body, times, poses, feet_states, command_fn, fps=20,
     if show:
         plt.show()
     return anim
+
+
+def animate_demo(body, times, poses, feet_states, command_fn, on_p, counts, title, filename,
+                 fps=15, world=None, sensors=None, leg_map=False, verdict=None):
+    """
+    GIF de démonstration « commande vs vue de dessus » :
+      à gauche, la commande du cerveau (vitesse, virage), l'amplitude d'appui réellement
+      produite par les motoneurones de chaque côté (F - B en appui, fraction de N) et,
+      si leg_map, la carte de toutes les pattes ; un curseur suit le temps ;
+      à droite, la vue de dessus (corps, pattes, capteurs, obstacles).
+    times, poses, feet_states : sortie de Robot.trajectory() ;
+    on_p, counts : phases et comptes par demi-cycle (LegSet.recruitment), un par poussée.
+    leg_map : carte [patte, demi-cycle] de (F - B) / N pour TOUTES les pattes, triées par
+              côté puis par phase du CPG (preuve que chaque patte reçoit la bonne commande).
+    verdict : texte de vérification affiché sous la carte.
+    """
+    from matplotlib.animation import FuncAnimation, PillowWriter
+    from matplotlib.patches import Polygon
+    legs = body.legs
+    n = legs.n_motor
+    t_s = times / 1000
+    frame_t = np.arange(times[0], times[-1] + 1e-9, 1000 / fps)
+    frames = np.column_stack([np.interp(frame_t, times, poses[:, k]) for k in range(3)])
+    cycle = np.clip(np.searchsorted(times, frame_t, side='right') - 1, 0, len(feet_states) - 1)
+
+    n_rows = 3 if leg_map else 2
+    fig = plt.figure(figsize=(13, 6.5))
+    grid = fig.add_gridspec(n_rows, 2, width_ratios=[1.15, 1], hspace=0.55, wspace=0.18,
+                            left=0.11 if leg_map else 0.06, right=0.97, top=0.88,
+                            bottom=0.12 if verdict else 0.08)
+    fig.suptitle(title, fontsize=14, fontweight='bold')
+    left = [fig.add_subplot(grid[r, 0]) for r in range(n_rows)]
+    for ax in left[1:]:
+        ax.sharex(left[0])
+    cursors = [ax.axvline(t_s[0], color='black', linewidth=1.2, alpha=0.7) for ax in left]
+
+    # 1 : commande du cerveau
+    ax = left[0]
+    cmds = np.array([command_fn(t * ms) for t in times])
+    ax.step(t_s, cmds[:, 0], where='post', color='black', linewidth=2, label='vitesse')
+    ax.step(t_s, cmds[:, 1], where='post', color='purple', linestyle='--', linewidth=2,
+            label='virage (< 0 gauche)')
+    ax.axhline(0, color='grey', linewidth=0.5)
+    ax.set_ylim(-1.15, 1.15)
+    ax.set_title('Commande du cerveau (entrée)', fontsize=10, loc='left')
+    ax.legend(loc='lower right', bbox_to_anchor=(1, 1), fontsize=8, ncol=2, frameon=False)
+    ax.grid(True, linewidth=0.5, alpha=0.5)
+
+    # 2 : amplitude d'appui produite, moyenne des pattes en appui de chaque côté
+    ax = left[1]
+    amp = np.array([body.side_push(c, p) for c, p in zip(counts, on_p)]) / body.stride
+    amp = np.vstack([amp, amp[-1:]])
+    ax.step(t_s, amp[:, 0], where='post', color='tab:blue', linewidth=2, label='côté gauche')
+    ax.step(t_s, amp[:, 1], where='post', color='tab:orange', linestyle='--', linewidth=2,
+            label='côté droit')
+    ax.axhline(0, color='grey', linewidth=0.5)
+    ax.set_ylim(-1.15, 1.15)
+    ax.set_title("Sortie motrice : (F - B) / N en appui", fontsize=10, loc='left')
+    ax.legend(loc='lower right', bbox_to_anchor=(1, 1), fontsize=8, ncol=2, frameon=False)
+    ax.grid(True, linewidth=0.5, alpha=0.5)
+
+    # 3 : carte de toutes les pattes (optionnelle)
+    if leg_map:
+        ax = left[2]
+        groups = [(side, phase) for side in (0, 1) for phase in (0, 1)]
+        order = sorted(legs.legs, key=lambda leg: (leg.side, leg.phase, leg.rank))
+        stroke = (counts[:, :, FORWARD] - counts[:, :, BACKWARD]) / n          # [demi-cycle, patte]
+        in_stance = np.array([[p == leg.phase for leg in order] for p in on_p])
+        img = np.where(in_stance, stroke[:, [leg.index for leg in order]], np.nan).T
+        cmap = plt.get_cmap('coolwarm_r').copy()
+        cmap.set_bad('gainsboro')                                       # en vol
+        ax.imshow(img, aspect='auto', cmap=cmap, vmin=-1, vmax=1, interpolation='nearest',
+                  extent=(t_s[0], t_s[-1], len(order), 0))
+        sizes = [sum((leg.side, leg.phase) == g for leg in order) for g in groups]
+        edges = np.cumsum([0] + sizes)
+        ax.set_yticks((edges[:-1] + edges[1:]) / 2,
+                      [f'{"GD"[s]}, phase {"AB"[p]} ({k})' for (s, p), k in zip(groups, sizes)],
+                      fontsize=7)
+        for k, e in enumerate(edges[1:-1], start=1):
+            ax.axhline(e, color='black', linewidth=0.8 if k == 2 else 0.4)
+        ax.set_title(f"Les {legs.n_legs} pattes : amplitude d'appui de chacune "
+                     f"(bleu : avant, rouge : arrière, gris : en vol)", fontsize=10)
+        if verdict:
+            fig.text(0.31, 0.012, verdict, ha='center', fontsize=9, fontweight='bold',
+                     color='darkgreen' if 'aucune erreur' in verdict else 'red')
+    left[-1].set_xlabel('Temps (s)')
+    left[0].set_xlim(t_s[0], t_s[-1])
+    for ax in left[:-1]:
+        ax.tick_params(labelbottom=False)
+
+    # Vue de dessus
+    ax = fig.add_subplot(grid[:, 1])
+    _top_view_axes(ax, body, poses, None if world is None else 2 * body.length)
+    if world is not None:
+        _draw_world(ax, world)
+    ax.plot(poses[:, 0], poses[:, 1], color='lightgrey', linewidth=0.8, linestyle=':')
+    trail, = ax.plot([], [], color='grey', linewidth=1.5, zorder=2)
+    rays = _sensor_artists(ax, sensors) if sensors is not None else []
+    shape = ax.add_patch(Polygon(body.outline(frames[0]), closed=True, facecolor='tab:orange',
+                                 edgecolor='black', alpha=0.6, zorder=3))
+    leg_artists = _leg_artists(ax, body)
+    label = ax.text(0.02, 0.98, '', transform=ax.transAxes, va='top', family='monospace',
+                    fontsize=9, bbox=dict(facecolor='white', alpha=0.8, edgecolor='grey'))
+    shown = '' if legs.n_legs == 6 else f' (3 pattes dessinées par côté sur {legs.n_legs // 2})'
+    ax.text(0.02, 0.02, LEGS_LEGEND + shown, transform=ax.transAxes, fontsize=7)
+    ax.set_title('Vue de dessus', fontsize=10)
+
+    def update(f):
+        for cursor in cursors:
+            cursor.set_xdata([frame_t[f] / 1000] * 2)
+        trail.set_data(frames[:f + 1, 0], frames[:f + 1, 1])
+        shape.set_xy(body.outline(frames[f]))
+        shape.set_facecolor(_body_color(world, body, frames[f]))
+        if rays:
+            _update_sensors(rays, sensors, frames[f])
+        c = cycle[f]
+        _update_legs(leg_artists, body.feet(frames[f], frame_t[f] - times[c], feet_states[c]))
+        speed, steer = command_fn(frame_t[f] * ms)
+        mode = 'arrêt' if speed == 0 and steer == 0 else 'rotation' if speed == 0 else \
+            'avance' if speed > 0 else 'recule'
+        label.set_text(f"t = {frame_t[f] / 1000:5.2f} s\n{mode}\nvitesse {speed:+.2f}\n"
+                       f"virage  {steer:+.2f}\ncap {np.degrees(frames[f, 2]) - 90:+7.1f} deg")
+
+    anim = FuncAnimation(fig, update, frames=len(frame_t), interval=1000 / fps, blit=False)
+    filename = _out_path(filename)
+    anim.save(filename, writer=PillowWriter(fps=fps), dpi=80)
+    plt.close(fig)
+    print(f"Animation enregistrée dans '{filename}'.")
 
 
 class LiveTopView:

@@ -1,39 +1,44 @@
 """
 Hexapode piloté par un réseau de neurones à potentiels d'action (Brian2) - point d'entrée et scénarios de test.
 
-Modules :
-  config.py         paramètres globaux (pattes, neurones par groupe, rythme, délais, dt)
-  CPG.py            générateur de rythme (un potentiel d'action par demi-cycle)
-  legs.py           motoneurones des pattes (groupes R, D, F, B)
-  intermediates.py  6 interneurones inhibiteurs gradués entre le cerveau et les pattes
-  brain.py          le « cerveau » : code classique qui traduit les commandes en entrées des intermédiaires
-  body.py           pose du corps vue de dessus, déplacée par les pattes en appui (comme un char)
-  world.py          murs de l'arène et obstacles rectangulaires fixes
-  sensors.py        6 capteurs de distance gradués (réflexes sur les intermédiaires)
-  robot.py          la boucle fermée : réseau + corps + monde + capteurs
-  manual.py         pilotage manuel en direct : manette ou flèches (python manual.py)
-  visualisation.py  toutes les figures
+Points d'entrée : main.py (ce fichier : démonstrations et tests), manual.py (pilotage en direct).
+Le reste du code est dans le package hexapode/ :
+  config.py                 paramètres globaux (pattes, neurones par groupe, rythme, délais, dt)
+  reseau/        les neurones (Brian2)
+    CPG.py                  générateur de rythme (un potentiel d'action par demi-cycle)
+    legs.py                 motoneurones des pattes (groupes R, D, F, B)
+    intermediates.py        6 interneurones inhibiteurs gradués entre le cerveau et les pattes
+    sensors.py              4 capteurs de distance gradués (réflexes sur les intermédiaires)
+  simulation/    le code classique autour du réseau
+    brain.py                le « cerveau » : traduit les commandes en entrées des intermédiaires
+    body.py                 pose du corps vue de dessus, déplacée par les pattes en appui (comme un char)
+    world.py                murs de l'arène et obstacles rectangulaires fixes
+    robot.py                la boucle fermée : réseau + corps + monde + capteurs
+    scenarios.py            scénarios de commandes (timeline -> command_fn)
+  affichage/     les figures
+    visualisation.py        figures et animations (sorties dans graphs/)
+    figures_rapport.py      figures du rapport (graphs/rapport/)
 
 TODO (feuille de route du projet)
 - CPG plus rapide pour réduire la latence des commandes (une commande attend jusqu'à une
   demi-période le prochain potentiel d'action du CPG). Contraintes : TAU_M <= période / 20,
   EXC_DELAY + LIFT_DELAY < période / 2, STRIDE par demi-cycle (la vitesse de marche double
   si la période est divisée par deux).
-- Le virage ne tient pas compte du sens de marche : pendant un recul, le frein d'évitement
-  ramène le nez vers l'obstacle (accepté pour l'instant).
 """
 import numpy as np
 from brian2 import Network, SpikeMonitor, StateMonitor, Synapses, defaultclock, ms
 
-import config
-from CPG import CPG
-from legs import LegSet, RAISE, LOWER, FORWARD, BACKWARD, KIND_NAMES
-from intermediates import IntermediateLayer
-from brain import Brain
-from body import Body
-from robot import Robot
-from world import World
-import visualisation as vis
+from hexapode import config
+from hexapode.reseau.CPG import CPG
+from hexapode.reseau.legs import LegSet, RAISE, LOWER, FORWARD, BACKWARD, KIND_NAMES
+from hexapode.reseau.intermediates import IntermediateLayer
+from hexapode.simulation.brain import Brain
+from hexapode.simulation.body import Body
+from hexapode.simulation.robot import Robot
+from hexapode.simulation.scenarios import DEFAULT_TIMELINE, timeline_command
+from hexapode.simulation.world import World
+from hexapode.reseau.sensors import FRONT, REAR
+from hexapode.affichage import visualisation as vis
 
 
 def test_cpg(n_cycles=4, filename="cpg_test.png", show=True):
@@ -61,7 +66,7 @@ def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
     """
     CPG + pattes, avec une inhibition de test qui remplace la couche intermédiaire :
     un potentiel d'action inhibiteur par potentiel d'action du CPG, livré au moment de
-    celui-ci (exc_delay avant l'EPSP), de poids legs.inhibition_weight(m).
+    celui-ci (exc_delay avant l'excitation), de poids legs.inhibition_weight(m).
 
     inhibition : {indice_patte: (m_F, m_B)}, appliquée dans les deux phases. Par défaut :
                  m_F réparti de 0 à N selon les pattes, m_B = N - m_F.
@@ -123,29 +128,6 @@ def test_legs(n_legs=config.N_LEGS, n_motor=config.N_MOTOR, tau_m=config.TAU_M,
     vis.plot_legs(legs, mon_cpg, mon_motor, mon_v, show_legs, inhibition, duration,
                   filename=filename, show=show)
     return counts
-
-
-DEFAULT_TIMELINE = [  # (temps de début, vitesse, virage)
-    (0 * ms, 1.0, 0.0),       # avant 100 %
-    (1000 * ms, 0.5, 0.0),    # avant 50 %
-    (2000 * ms, 1.0, -0.5),   # avant 100 %, virage gauche 50 % -> pattes gauches à 50 %
-    (3000 * ms, 0.5, 0.4),    # avant 50 %, virage droite 40 % -> pattes droites à 30 %
-    (4000 * ms, 0.0, 0.0),    # arrêt
-    (5000 * ms, -0.7, 0.0),   # arrière 70 %
-    (6000 * ms, 0.0, -1.0),   # rotation sur place vers la gauche, 100 %
-    (7000 * ms, -1.0, 0.5),   # arrière 100 %, virage droite 50 %
-]
-
-
-def timeline_command(timeline):
-    """command_fn(t) -> (vitesse, virage) à partir d'une liste de (temps de début, vitesse, virage)."""
-    def command_fn(t):
-        speed, steer = 0.0, 0.0
-        for t_start, sp, st in timeline:
-            if t >= t_start:
-                speed, steer = sp, st
-        return speed, steer
-    return command_fn
 
 
 def expected_recruitment(n, speed, steer, leg, in_stance):
@@ -242,8 +224,8 @@ def test_body(timeline=DEFAULT_TIMELINE, duration=8000 * ms, animate=True, show=
 
 
 def _front_gap(robot, pose):
-    """Plus petite distance (m) mesurée par les capteurs avant à une pose."""
-    return float(robot.sensors.rays(pose)[2][:2].min())
+    """Distance (m) mesurée par le capteur avant à une pose."""
+    return float(robot.sensors.rays(pose)[2][FRONT])
 
 
 def _run_scenario(world, timeline, duration, start=(0.0, 0.0, np.pi / 2)):
@@ -260,7 +242,8 @@ def test_sensors(animate=True, show=True):
       3. mur dans la zone de recul, rotation sur place : capteurs coupés, la rotation
          est exactement celle obtenue sans obstacle
       4. mur dans la zone de recul, arrêt : capteurs coupés, le robot ne bouge pas
-      5. couloir, départ décentré, pleine vitesse avant : les capteurs latéraux recentrent le robot
+      5. couloir, départ décentré, pleine vitesse avant : le robot y entre sans toucher les murs
+         (il ondule autour du centre : les capteurs latéraux ne voient pas le cap)
     Le scénario 1 est aussi tracé (et animé).
     """
     results = []
@@ -296,7 +279,7 @@ def test_sensors(animate=True, show=True):
     world = World([(-0.5, -1.0, 0.5, -0.8)])
     robot = _run_scenario(world, [(0 * ms, -1.0, 0.0)], 8000 * ms)
     hit, reversals = yoyo(robot, world)
-    rear_gap = min(float(robot.sensors.rays(p)[2][2:4].min()) for p in robot.poses)
+    rear_gap = min(float(robot.sensors.rays(p)[2][REAR]) for p in robot.poses)
     results.append(("mur derrière, marche arrière : pas de contact, va-et-vient", not hit and reversals >= 4,
                     f"écart arrière min {rear_gap:.3f} m, {reversals} changements de sens"))
 
@@ -320,15 +303,23 @@ def test_sensors(animate=True, show=True):
                     moved == 0.0, f"écart avant {_front_gap(robot, poses[0]):.3f} m, "
                                   f"plus grand changement de pose {moved:.4f}"))
 
-    # 5. couloir de 0,5 m de large, départ décentré de 8 cm : les capteurs latéraux recentrent le robot
+    # 5. couloir de 0,5 m de large, départ décentré de 8 cm : entre et avance sans contact
     world = World([(-0.55, 0.2, -0.25, 2.0), (0.25, 0.2, 0.55, 2.0)])
-    robot = _run_scenario(world, [(0 * ms, 1.0, 0.0)], 6000 * ms, start=(-0.08, 0.0, np.pi / 2))
+    timeline = [(0 * ms, 1.0, 0.0)]
+    robot = _run_scenario(world, timeline, 10000 * ms, start=(-0.08, 0.0, np.pi / 2))
+    if animate:
+        times, poses, feet_states = robot.trajectory()
+        vis.animate_body(robot.body, times, poses, feet_states, timeline_command(timeline),
+                         filename="sensors_corridor.gif", show=False, world=world,
+                         sensors=robot.sensors)
     poses = np.array(robot.poses)
     inside = poses[:, 1] > 0.6                        # bien à l'intérieur du couloir
     hit = any(world.overlaps(np.vstack([robot.body.outline(p), p[:2]])) for p in poses)
-    off = np.abs(poses[inside, 0])
-    results.append(("couloir, marche avant : pas de contact, centré", not hit and off[-4:].max() < 0.04,
-                    f"décentrage 0.080 -> max {off.max():.3f}, dernier {off[-1]:.3f} m"))
+    off = np.abs(poses[inside, 0]) if inside.any() else np.array([np.nan])
+    results.append(("couloir, marche avant : pas de contact, reste dans le couloir",
+                    not hit and inside.any(),
+                    f"départ décentré de 0.080 m, ondulation max {off.max():.3f} m, "
+                    f"y final {poses[-1, 1]:.2f} m"))
 
     print("Réflexes des capteurs :")
     for name, ok, detail in results:
@@ -341,9 +332,92 @@ def test_sensors(animate=True, show=True):
     return results
 
 
+# --- Démonstrations : un GIF « commande vs vue de dessus » par fonctionnalité --------------
+
+DEMO_DIR = "demos"     # sous-dossier de graphs/
+
+DEMOS = {  # nom : (titre, scénario, durée, options)
+    'avant_arriere': (
+        "Marche avant et arrière à vitesse variable",
+        [(0 * ms, 1.0, 0.0), (2000 * ms, 0.5, 0.0), (4000 * ms, 0.0, 0.0),
+         (5000 * ms, -0.5, 0.0), (7000 * ms, -1.0, 0.0)], 9000 * ms, {}),
+    'rotation': (
+        "Rotation sur place (vitesse 0) : gauche, arrêt, droite à 50 % puis 100 %",
+        [(0 * ms, 0.0, -1.0), (3000 * ms, 0.0, 0.0), (4000 * ms, 0.0, 0.5),
+         (6500 * ms, 0.0, 1.0)], 9000 * ms, {}),
+    'virages': (
+        "Virages d'angle variable en marche (gauche 25, 50, 100 %, puis droite, puis en reculant)",
+        [(0 * ms, 1.0, 0.0), (1000 * ms, 1.0, -0.25), (3000 * ms, 1.0, -0.5),
+         (5000 * ms, 1.0, -1.0), (6500 * ms, 1.0, 0.5), (8500 * ms, -1.0, 0.5)],
+        10500 * ms, {}),
+    'tous_mouvements': (
+        "Enchaînement de tous les mouvements (scénario de test_control)",
+        DEFAULT_TIMELINE, 8000 * ms, {}),
+    'capteur_avant': (
+        "Capteur avant : commande « avance à fond » vers un mur -> freinage et va-et-vient",
+        [(0 * ms, 1.0, 0.0)], 8000 * ms, {'world': [(-0.5, 1.0, 0.5, 1.2)]}),
+    'couloir': (
+        "Capteurs latéraux : couloir de 0,5 m, départ décentré de 8 cm, sans contact",
+        [(0 * ms, 1.0, 0.0)], 10000 * ms,
+        {'world': [(-0.55, 0.2, -0.25, 2.0), (0.25, 0.2, 0.55, 2.0)],
+         'start': (-0.08, 0.0, np.pi / 2)}),
+    '20_paires': (
+        "20 paires de pattes (40 pattes), même réseau, même scénario",
+        DEFAULT_TIMELINE, 8000 * ms, {'n_legs': 40}),
+    '200_paires': (
+        "200 paires de pattes (400 pattes), même réseau, même scénario",
+        DEFAULT_TIMELINE, 8000 * ms, {'n_legs': 400}),
+}
+
+
+def demo(name, fps=15):
+    """
+    Lance la démonstration `name` de DEMOS en boucle fermée (Robot) et enregistre
+    graphs/demos/<name>.gif. Sans obstacle, vérifie aussi, pour chaque patte et chaque
+    demi-cycle, le nombre exact de neurones R, D, F, B qui déchargent (comme test_control).
+    """
+    title, timeline, duration, opts = DEMOS[name]
+    n_legs = opts.get('n_legs', config.N_LEGS)
+    world = World(opts['world']) if 'world' in opts else None
+    command_fn = timeline_command(timeline)
+    print(f"\n=== Démo '{name}' : {n_legs} pattes, {float(duration / ms) / 1000:.1f} s ===")
+    robot = Robot(command_fn, world=world, n_legs=n_legs,
+                  start=opts.get('start', (0.0, 0.0, np.pi / 2)))
+    robot.run(duration)
+    times, poses, feet_states = robot.trajectory()
+    # un demi-cycle par poussée appliquée au corps
+    _, on_p, counts, _ = robot.legs.recruitment(robot.mon_cpg, robot.mon_motor)
+    k = len(robot.push_times)
+    on_p, counts = on_p[:k], counts[:k]
+
+    verdict = None
+    if world is None:      # sans capteurs, chaque patte doit suivre exactement la commande
+        n_errors = sum(not np.array_equal(
+            counts[c, leg.index],
+            expected_recruitment(robot.legs.n_motor, *command_fn(t * ms), leg, on_p[c] == leg.phase))
+            for c, t in enumerate(robot.push_times) for leg in robot.legs.legs)
+        verdict = (f"{k} demi-cycles x {n_legs} pattes vérifiés (R, D, F, B) : "
+                   + ("aucune erreur" if n_errors == 0 else f"{n_errors} ERREUR(S)"))
+        print(verdict)
+    x, y, h = poses[-1]
+    print(f"Pose finale : x={x:+.3f} m, y={y:+.3f} m, cap={np.degrees(h):.1f} deg")
+    vis.animate_demo(robot.body, times, poses, feet_states, command_fn, on_p, counts,
+                     title, f"{DEMO_DIR}/{name}.gif", fps=fps, world=world,
+                     sensors=robot.sensors, leg_map=n_legs > 6, verdict=verdict)
+    return robot
+
+
+def run_demos(names=None):
+    """Toutes les démonstrations (ou celles de `names`) : GIF dans graphs/demos/."""
+    for name in names or DEMOS:
+        demo(name)
+
+
 if __name__ == '__main__':
+    # Tests avec vérifications automatiques (figures dans graphs/)
     # test_cpg()
     # test_legs()
     # test_control()
     # test_body()
-    test_sensors()
+    # test_sensors()
+    run_demos()

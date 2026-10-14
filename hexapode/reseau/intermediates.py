@@ -2,7 +2,7 @@
 from brian2 import *
 import numpy as np
 
-from legs import RAISE, FORWARD
+from hexapode.reseau.legs import RAISE, FORWARD
 
 # Indices des neurones intermédiaires
 I_FWD_L, I_FWD_R, I_REV_L, I_REV_R, I_STEER_L, I_STEER_R = range(6)
@@ -24,7 +24,7 @@ class IntermediateLayer:
     gate   : fixé par le Brain, à 1 seulement en marche (arrêt ou rotation : capteurs ignorés).
 
     À chaque potentiel d'action du CPG (signal de phase), chaque intermédiaire libère une
-    inhibition de level * N paliers de seuil sur ses cibles, qui arrive avant l'EPSP du CPG :
+    inhibition de level * N paliers de seuil sur ses cibles, qui arrive avant l'excitation du CPG :
 
       I-Fwd-X (côté X) : marche avant du côté X
           F des pattes en appui, B des pattes en balancement, R
@@ -37,7 +37,7 @@ class IntermediateLayer:
       F en appui        : N - (1 - s)N = sN déchargent    (poussée)
       B en balancement  : N - (1 - s)N = sN déchargent    (retour, symétrique de la poussée)
       B en appui, F en balancement : N - N = 0
-      R (EPSP 2N)       : 2N - (1 - s)N - N = sN > 0 -> la patte se lève
+      R (excitation 2N) : 2N - (1 - s)N - N = sN > 0 -> la patte se lève
     Avec tous les intermédiaires à 0, tout déchargerait : le Brain doit donc envoyer
     le motif « arrêt » par défaut.
 

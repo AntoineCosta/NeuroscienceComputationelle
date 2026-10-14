@@ -1,4 +1,4 @@
-# Hexapode piloté par un réseau de neurones impulsionnels (Brian2)
+﻿# Hexapode piloté par un réseau de neurones impulsionnels (Brian2)
 
 Simulation d'un robot hexapode dont la marche est **entièrement produite par un réseau de
 neurones** écrit avec [Brian2](https://brian2.readthedocs.io). On peut le piloter en direct
@@ -8,9 +8,9 @@ neurones** écrit avec [Brian2](https://brian2.readthedocs.io). On peut le pilot
 - un **CPG** (2 neurones) donne le rythme : une marche en tripode, 500 ms par cycle ;
 - des **motoneurones** à seuils étagés codent l'amplitude du pas par le *nombre* de neurones qui déchargent ;
 - 6 **interneurones inhibiteurs** traduisent les commandes (avancer, reculer, tourner) en freinage de ces motoneurones ;
-- 6 **capteurs** ajoutent des réflexes (freiner, reculer, s'écarter d'un mur) en passant par ces mêmes interneurones.
+- 4 **capteurs** ajoutent des réflexes (freiner, reculer, s'écarter d'un mur) en passant par ces mêmes interneurones.
 
-Le projet est uniquement en simulation (pas de matériel). Le nombre de pattes est réglable (6 à 200).
+Le projet est uniquement en simulation (pas de matériel). Le nombre de pattes est réglable (6 à 400, soit 200 paires).
 
 ---
 
@@ -22,7 +22,7 @@ conda activate brian2_env
 pip install pygame        # optionnel : seulement pour la manette
 
 python manual.py          # pilotage en direct
-python main.py            # tests automatiques (figures dans graphs/)
+python main.py            # démonstrations (GIF dans graphs/demos/)
 ```
 
 | Commande | Manette (Xbox) | Clavier |
@@ -45,7 +45,7 @@ B en rouge (pied creux = levé) ; rayons des capteurs du vert (loin) au rouge (p
  Commande (manette / clavier / scénario)
       │ (vitesse, virage)
       ▼
- Cerveau (code) ──► 6 INTERMÉDIAIRES inhibiteurs ◄── 6 CAPTEURS de distance
+ Cerveau (code) ──► 6 INTERMÉDIAIRES inhibiteurs ◄── 4 CAPTEURS de distance
                           │ inhibition                    ▲
  CPG (rythme) ──────────► MOTONEURONES des pattes         │
                           │ potentiels d'action           │
@@ -65,7 +65,7 @@ Le **cerveau** décide *quoi faire*, le **CPG** décide *quand*, les **interméd
 | UP / DWN | R (lever) / D (poser) |
 | AVG, AVD, REG, RED int | I-Fwd-L, I-Fwd-R, I-Rev-L, I-Rev-R |
 | G, D int | I-Steer-L, I-Steer-R |
-| SeH, SeB, SeG, SeD | capteurs avant (FL, FR), arrière (RL, RR), côtés (SL, SR) |
+| SeH, SeB, SeG, SeD | capteurs avant, arrière, côtés gauche (SL) et droit (SR) |
 
 </details>
 
@@ -102,16 +102,16 @@ Neurones gradués (sans potentiel d'action), d'activité `level = clip(brain + g
 s·N neurones F poussent en appui, s·N neurones B ramènent la patte en vol.
 Tourner revient à freiner davantage un côté.
 
-### 4. Capteurs : 6 neurones de réflexe
+### 4. Capteurs : 4 neurones de réflexe
 
 Chaque capteur est une ligne de visée qui produit `near` (obstacle proche, graduel) et
 `close` (zone de recul, < 0,2 m). Ils agissent sur l'entrée `sensor` des intermédiaires :
 
-| Capteurs | Position | Effet |
+| Capteur | Position | Effet |
 |---|---|---|
-| FL, FR | avant, ±20° | freinent la marche avant ; font tourner à l'opposé de l'obstacle |
-| RL, RR | arrière, ±160° | freinent la marche arrière |
-| SL, SR | flancs, ±90° | font tourner à l'opposé du mur (le robot se centre dans un couloir) |
+| Avant | nez, dans l'axe | freine la marche avant, puis déclenche le recul |
+| Arrière | queue, dans l'axe | freine la marche arrière, puis déclenche le retour en avant |
+| SL, SR | flancs, ±90° | font tourner à l'opposé du mur (le robot suit un couloir sans le toucher) |
 
 Trop près (< 0,2 m), le capteur **désinhibe la direction opposée** : le robot recule jusqu'à
 sortir de la zone, puis la commande reprend la main (va-et-vient). À l'arrêt ou en rotation
@@ -152,19 +152,49 @@ Une commande met donc 0 à ¼ s à prendre effet (attente du prochain potentiel 
 
 ## Fichiers
 
-| Fichier | Rôle |
+Seuls les deux points d'entrée sont à la racine ; tout le reste est dans le package `hexapode/`.
+
+```
+main.py, manual.py         points d'entrée (démos et tests / pilotage en direct)
+hexapode/
+  config.py                tous les paramètres (pattes, rythme, délais, géométrie, capteurs), commentés
+  reseau/                  les neurones (Brian2)
+    CPG.py, legs.py, intermediates.py, sensors.py
+  simulation/              le code classique autour du réseau
+    brain.py, body.py, world.py, robot.py, scenarios.py
+  affichage/               les figures
+    visualisation.py       figures et animations
+    figures_rapport.py     figures du rapport
+graphs/                    figures générées, schéma du réseau ; demos/ (GIF), rapport/
+docs/                      ancien résumé du code
+```
+
+Les figures du rapport se régénèrent depuis la racine avec
+`python -m hexapode.affichage.figures_rapport` (sorties dans `graphs/rapport/`).
+Les sorties vont toujours dans `graphs/` du projet, quel que soit le dossier de lancement.
+
+## Démonstrations
+
+`python main.py` produit un GIF par fonctionnalité dans `graphs/demos/` (environ 10 min).
+À gauche, la commande du cerveau et l'amplitude d'appui réellement produite par chaque côté ;
+à droite, la vue de dessus. Sans obstacle, chaque démo vérifie aussi le nombre exact de
+neurones R, D, F, B qui déchargent, pour chaque patte et chaque demi-cycle.
+
+| GIF | Montre |
 |---|---|
-| `config.py` | tous les paramètres (pattes, rythme, délais, géométrie, capteurs), commentés |
-| `CPG.py`, `legs.py`, `intermediates.py`, `sensors.py` | les 4 étages du réseau |
-| `brain.py`, `body.py`, `world.py`, `robot.py` | code classique et boucle fermée |
-| `manual.py` | pilotage en direct |
-| `main.py` | tests automatiques |
-| `visualisation.py` | figures et animations |
-| `graphs/` | figures générées et schéma du réseau |
+| `avant_arriere` | marche avant / arrière à 100 % et 50 %, arrêt |
+| `rotation` | rotation sur place à gauche, à droite, à 50 % et 100 % |
+| `virages` | virages de plus en plus serrés (25, 50, 100 %), à droite, en reculant |
+| `tous_mouvements` | enchaînement complet (scénario de `test_control`) |
+| `capteur_avant` | commande « avance » constante vers un mur : freinage puis va-et-vient |
+| `couloir` | traversée d'un couloir de 0,5 m sans contact |
+| `20_paires`, `200_paires` | même réseau avec 40 et 400 pattes, carte de toutes les pattes |
+
+Une seule démo : `python -c "import main; main.demo('couloir')"`.
 
 ## Tests
 
-`python main.py` lance `test_sensors()` ; les autres tests sont à décommenter en bas de `main.py`.
+Les tests sont à décommenter en bas de `main.py`.
 Chacun vérifie automatiquement ses résultats et enregistre ses figures dans `graphs/`.
 
 | Test | Vérifie |
@@ -173,13 +203,14 @@ Chacun vérifie automatiquement ses résultats et enregistre ses figures dans `g
 | `test_legs()` | recrutement de N − m neurones sous inhibition, seuils bas d'abord |
 | `test_control()` | réseau complet sur 8 s : nombre exact de R, D, F, B par patte et par demi-cycle |
 | `test_body()` | idem, plus la trajectoire du corps (figure + animation) |
-| `test_sensors()` | 5 réflexes : mur devant, mur derrière, rotation et arrêt près d'un mur, centrage dans un couloir |
+| `test_sensors()` | 5 réflexes : mur devant, mur derrière, rotation et arrêt près d'un mur, traversée d'un couloir sans contact |
 
-`test_control(n_legs=200, n_motor=50)` fonctionne aussi.
+`test_control(n_legs=400)` fonctionne aussi.
 
 ## Limites connues
 
 - **Latence :** jusqu'à ¼ s entre une commande et le mouvement (attente du CPG).
-- **Virage pendant un recul réflexe :** l'évitement ramène le nez vers l'obstacle.
+- **Ondulation dans un couloir :** les capteurs latéraux voient la distance au mur mais pas le
+  cap, donc le virage n'est pas amorti : le robot oscille autour du centre (±7 cm) sans toucher.
 - **À basse vitesse :** le frein progressif arrête le robot avant la zone de recul (pas de va-et-vient).
 - **Collisions :** pas de physique, le corps traverse les obstacles (affiché en rouge).

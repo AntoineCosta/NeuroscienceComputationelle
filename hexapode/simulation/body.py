@@ -2,8 +2,8 @@
 import numpy as np
 from brian2 import ms
 
-from config import BODY_LENGTH, BODY_WIDTH, TRACK_WIDTH, STRIDE
-from legs import RAISE, LOWER, FORWARD, BACKWARD
+from hexapode.config import BODY_LENGTH, BODY_WIDTH, TRACK_WIDTH, STRIDE
+from hexapode.reseau.legs import RAISE, LOWER, FORWARD, BACKWARD
 
 SHOWN_RANKS = 3   # pattes dessinées par côté, quel que soit N_LEGS (affichage plus léger)
 

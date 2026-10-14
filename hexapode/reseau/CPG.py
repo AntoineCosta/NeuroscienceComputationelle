@@ -2,7 +2,7 @@
 from brian2 import *
 import numpy as np
 
-from config import CYCLE_PERIOD
+from hexapode.config import CYCLE_PERIOD
 
 
 class CPG:

@@ -2,7 +2,7 @@
 from brian2 import *
 import numpy as np
 
-from config import N_LEGS, N_MOTOR, TAU_M, EXC_DELAY, LIFT_DELAY
+from hexapode.config import N_LEGS, N_MOTOR, TAU_M, EXC_DELAY, LIFT_DELAY
 
 # Types de motoneurones
 RAISE, LOWER, FORWARD, BACKWARD = 0, 1, 2, 3
@@ -42,9 +42,10 @@ class LegSet:
 
     Motoneurone : LIF (v relatif au repos), seuils régulièrement espacés :
         theta_k = (k + 1/2) * u     (R et D : theta_0)
-    Chaque potentiel d'action du CPG donne un seul EPSP de N*u à ses cibles F/B : sans
+    Chaque potentiel d'action du CPG donne une seule excitation de N*u à ses cibles F/B
+    (un PPSE, potentiel postsynaptique excitateur ; une inhibition est un PPSI) : sans
     inhibition, les N neurones d'un groupe déchargent (une fois, tous ensemble). Une
-    inhibition arrivant juste avant abaisse v de m*u au moment de l'EPSP : seuls les
+    inhibition arrivant juste avant abaisse v de m*u au moment de l'excitation : seuls les
     N - m seuils les plus bas sont atteints. Le poids inhibiteur est donné par
     inhibition_weight(m).
 
@@ -52,7 +53,7 @@ class LegSet:
       - D (poser) <- CPG p (début de l'appui)
       - R (lever) <- CPG 1-p (début du balancement), retardé de lift_delay
       - F et B    <- les deux neurones du CPG (direction choisie par la couche intermédiaire)
-    R reçoit un EPSP de 2N*u : il est freiné par les deux intermédiaires de direction
+    R reçoit une excitation de 2N*u : il est freiné par les deux intermédiaires de direction
     (avant et arrière), donc la patte se lève dès qu'une direction a une vitesse non nulle.
     D reçoit N*u et n'est jamais freiné : chaque début d'appui pose le pied, donc à
     l'arrêt tous les pieds finissent au sol (poser un pied déjà posé ne change rien).
@@ -60,8 +61,8 @@ class LegSet:
 
     def __init__(self, cpg, n_legs=N_LEGS, n_motor=N_MOTOR, tau_m=TAU_M,
                  exc_delay=EXC_DELAY, lift_delay=LIFT_DELAY, u=1*mV, t_ref=2*ms):
-        if n_legs % 2 or not 6 <= n_legs <= 200:
-            raise ValueError("n_legs doit être pair et compris entre 6 et 200")
+        if n_legs % 2 or not 6 <= n_legs <= 400:
+            raise ValueError("n_legs doit être pair et compris entre 6 et 400")
         if not defaultclock.dt <= exc_delay < cpg.period / 2:
             raise ValueError("exc_delay doit être compris entre dt et une demi-période")
         if lift_delay + exc_delay >= cpg.period / 2:
@@ -107,7 +108,7 @@ class LegSet:
 
         self.legs = [Leg(self.motors, i, n, n_legs) for i in range(n_legs)]
 
-        # --- Excitation par le CPG : un EPSP de N*u (F/B/D) ou 2N*u (R) par potentiel d'action
+        # --- Excitation par le CPG : excitation de N*u (F/B/D) ou 2N*u (R) par potentiel d'action
         # v fuit pendant un pas entre le saut synaptique et le test du seuil :
         # le poids compense cette fuite pour avoir v = N*u (2N*u) exactement au test.
         self.excitation = Synapses(cpg.neurons, self.motors, model='w : volt (constant)',
@@ -134,10 +135,10 @@ class LegSet:
     def inhibition_weight(self, m, lead=None):
         """
         Poids d'UN potentiel d'action qui décale le potentiel d'un groupe de m paliers de
-        seuil au moment de l'EPSP du CPG : en inhibition, il fait taire les m seuils les
+        seuil au moment de l'excitation du CPG : en inhibition, il fait taire les m seuils les
         plus hauts (m = N fait tout taire, R/D compris) ; en excitation, il annule m paliers
         d'inhibition. m peut être fractionnaire (le recrutement arrondit au palier le plus proche).
-        lead : temps entre l'arrivée du potentiel d'action et l'EPSP du CPG
+        lead : temps entre l'arrivée du potentiel d'action et l'excitation du CPG
         (par défaut : exc_delay, c.-à-d. une arrivée au moment du potentiel d'action du CPG).
         """
         lead = self.exc_delay if lead is None else lead

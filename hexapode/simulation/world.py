@@ -1,7 +1,7 @@
 """Monde : arène carrée avec murs et obstacles rectangulaires fixes (vue de dessus, mètres)."""
 import numpy as np
 
-from config import ARENA_SIZE
+from hexapode.config import ARENA_SIZE
 
 # (x_min, y_min, x_max, y_max). Le robot part de (0, 0), orienté vers +y (vers le haut).
 DEFAULT_OBSTACLES = [

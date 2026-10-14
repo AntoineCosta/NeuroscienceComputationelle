@@ -4,10 +4,10 @@ import time
 import numpy as np
 from brian2 import network_operation, ms, second
 
-import config
-from robot import Robot
-from world import World
-import visualisation as vis
+from hexapode import config
+from hexapode.simulation.robot import Robot
+from hexapode.simulation.world import World
+from hexapode.affichage import visualisation as vis
 
 KEY_SPEED = 1.0   # haut / bas : vitesse de marche
 KEY_STEER = 0.5   # + gauche / droite en marche : amplitude de ce côté divisée par 2 (courbe)
