@@ -1,0 +1,162 @@
+[sans_homeo] 500/5001 images  221 s
+[theta_0.05] 500/5001 images  226 s
+[p_ei_0.5] 500/5001 images  226 s
+[n50] 500/5001 images  230 s
+[p_ie_0.5] 500/5001 images  232 s
+[base] 500/15003 images  235 s
+[n200] 500/5001 images  252 s
+[sans_norm] 500/5001 images  266 s
+[n400] 500/5001 images  281 s
+[n25] 500/5001 images  297 s
+[p_in_0.5] 500/5001 images  357 s
+[sans_homeo] 1000/5001 images  434 s
+[theta_0.05] 1000/5001 images  442 s
+[base] 1000/15003 images  462 s
+[n200] 1000/5001 images  490 s
+[p_ei_0.5] 1000/5001 images  492 s
+[n400] 1000/5001 images  544 s
+[p_ie_0.1] 500/5001 images  568 s
+[n50] 1000/5001 images  576 s
+[sans_homeo] 1500/5001 images  638 s
+[theta_0.05] 1500/5001 images  652 s
+[p_in_0.5] 1000/5001 images  683 s
+[sans_norm] 1000/5001 images  691 s
+[p_ie_0.5] 1000/5001 images  729 s
+[n200] 1500/5001 images  732 s
+[base] 1500/15003 images  753 s
+[n400] 1500/5001 images  829 s
+[sans_homeo] 2000/5001 images  867 s
+[theta_0.05] 2000/5001 images  886 s
+[n200] 2000/5001 images  1021 s
+[sans_homeo] 2500/5001 images  1120 s
+[theta_0.05] 2500/5001 images  1142 s
+[n400] 2000/5001 images  1148 s
+[p_in_0.5] 1500/5001 images  1161 s
+[p_ei_0.5] 1500/5001 images  1218 s
+[n200] 2500/5001 images  1297 s
+[n25] 1000/5001 images  1303 s
+[base] 2000/15003 images  1316 s
+[sans_homeo] 3000/5001 images  1334 s
+[theta_0.05] 3000/5001 images  1357 s
+[sans_norm] 1500/5001 images  1381 s
+[n400] 2500/5001 images  1411 s
+[sans_homeo] 3500/5001 images  1535 s
+[n50] 1500/5001 images  1556 s
+[theta_0.05] 3500/5001 images  1560 s
+[n200] 3000/5001 images  1604 s
+[n400] 3000/5001 images  1666 s
+[p_in_0.5] 2000/5001 images  1691 s
+[p_ie_0.1] 1000/5001 images  1710 s
+[sans_homeo] 4000/5001 images  1735 s
+[theta_0.05] 4000/5001 images  1770 s
+[p_ie_0.5] 1500/5001 images  1814 s
+[n400] 3500/5001 images  1950 s
+[sans_homeo] 4500/5001 images  1965 s
+[theta_0.05] 4500/5001 images  2024 s
+[n200] 3500/5001 images  2056 s
+[sans_homeo] 5000/5001 images  2190 s
+[sans_norm] 2000/5001 images  2191 s
+[base] 2500/15003 images  2193 s
+[n400] 4000/5001 images  2243 s
+[p_ei_0.5] 2000/5001 images  2259 s
+[theta_0.05] 5000/5001 images  2268 s
+[n25] 1500/5001 images  2304 s
+[p_in_0.5] 2500/5001 images  2515 s
+[n400] 4500/5001 images  2525 s
+[n50] 2000/5001 images  2592 s
+[n200] 4000/5001 images  2622 s
+[n400] 5000/5001 images  2819 s
+[p_ie_0.1] 1500/5001 images  2824 s
+[p_ie_0.5] 2000/5001 images  2901 s
+[sans_norm] 2500/5001 images  3101 s
+[base] 3000/15003 images  3212 s
+[n25] 2000/5001 images  3283 s
+[p_ei_0.5] 2500/5001 images  3307 s
+[n200] 4500/5001 images  3349 s
+[sans_homeo] époque 1 : {'ep1_train_vote': 0.18, 'ep1_val_vote': 0.1772, 'ep1_test_vote': 0.181}
+Terminé : sans_homeo
+[p_in_0.5] 3000/5001 images  3478 s
+[n50] 2500/5001 images  3591 s
+[theta_0.05] époque 1 : {'ep1_train_vote': 0.663, 'ep1_val_vote': 0.6496, 'ep1_test_vote': 0.657}
+Terminé : theta_0.05
+[p_ie_0.1] 2000/5001 images  3865 s
+[p_ie_0.5] 2500/5001 images  3924 s
+[sans_norm] 3000/5001 images  4056 s
+[n200] 5000/5001 images  4177 s
+[base] 3500/15003 images  4193 s
+[n25] 2500/5001 images  4204 s
+[p_ei_0.5] 3000/5001 images  4294 s
+[p_in_0.5] 3500/5001 images  4396 s
+[n400] époque 1 : {'ep1_train_vote': 0.854, 'ep1_val_vote': 0.7638, 'ep1_test_vote': 0.796}
+Terminé : n400
+[n50] 3000/5001 images  4499 s
+[p_ie_0.1] 2500/5001 images  4786 s
+[p_ie_0.5] 3000/5001 images  4820 s
+[sans_norm] 3500/5001 images  4924 s
+[n25] 3000/5001 images  5009 s
+[base] 4000/15003 images  5051 s
+[p_ei_0.5] 3500/5001 images  5142 s
+[p_in_0.5] 4000/5001 images  5208 s
+[sans_norm] ERREUR : BrianObjectException('An error occurred when preparing an object.', Thresholder(clock=Clock(dt=0.5 * msecond, name='defaultclock'), when=thresholds, order=0, name='neurongroup_1_spike_thresholder'))
+[n50] 3500/5001 images  5374 s
+[p_ie_0.1] 3000/5001 images  5831 s
+[p_ie_0.5] 3500/5001 images  5855 s
+[n25] 3500/5001 images  5994 s
+[base] 4500/15003 images  6090 s
+[p_ei_0.5] 4000/5001 images  6192 s
+[p_in_0.5] 4500/5001 images  6211 s
+[n50] 4000/5001 images  6326 s
+[p_ie_0.1] 3500/5001 images  6746 s
+[p_ie_0.5] 4000/5001 images  6752 s
+[n25] 4000/5001 images  6833 s
+[n200] époque 1 : {'ep1_train_vote': 0.775, 'ep1_val_vote': 0.7738, 'ep1_test_vote': 0.748}
+Terminé : n200
+[base] 5000/15003 images  6980 s
+[p_in_0.5] 5000/5001 images  7067 s
+[p_ei_0.5] 4500/5001 images  7088 s
+[n50] 4500/5001 images  7178 s
+[p_ie_0.5] 4500/5001 images  7642 s
+[p_ie_0.1] 4000/5001 images  7651 s
+[n25] 4500/5001 images  7661 s
+[p_ei_0.5] 5000/5001 images  7978 s
+[n50] 5000/5001 images  8033 s
+[n25] 5000/5001 images  8604 s
+[p_ie_0.5] 5000/5001 images  19668 s
+[p_ie_0.1] 4500/5001 images  19688 s
+[p_ie_0.1] 5000/5001 images  20528 s
+[base] époque 1 : {'ep1_train_vote': 0.729, 'ep1_val_vote': 0.6937, 'ep1_test_vote': 0.693}
+[base] 5500/15003 images  21221 s
+[p_in_0.5] époque 1 : {'ep1_train_vote': 0.693, 'ep1_val_vote': 0.6547, 'ep1_test_vote': 0.669}
+Terminé : p_in_0.5
+[p_ei_0.5] époque 1 : {'ep1_train_vote': 0.664, 'ep1_val_vote': 0.6977, 'ep1_test_vote': 0.683}
+Terminé : p_ei_0.5
+[n50] époque 1 : {'ep1_train_vote': 0.64, 'ep1_val_vote': 0.6236, 'ep1_test_vote': 0.61}
+Terminé : n50
+[base] 6000/15003 images  21872 s
+[p_ie_0.5] époque 1 : {'ep1_train_vote': 0.594, 'ep1_val_vote': 0.6276, 'ep1_test_vote': 0.629}
+Terminé : p_ie_0.5
+[n25] époque 1 : {'ep1_train_vote': 0.526, 'ep1_val_vote': 0.6056, 'ep1_test_vote': 0.57}
+Terminé : n25
+[base] 6500/15003 images  22557 s
+[p_ie_0.1] époque 1 : {'ep1_train_vote': 0.499, 'ep1_val_vote': 0.5696, 'ep1_test_vote': 0.56}
+Terminé : p_ie_0.1
+[base] 7000/15003 images  23212 s
+[base] 7500/15003 images  23825 s
+[base] 8000/15003 images  24434 s
+[base] 8500/15003 images  25048 s
+[base] 9000/15003 images  25668 s
+[base] 9500/15003 images  26284 s
+[base] 10000/15003 images  26873 s
+[base] époque 2 : {'ep2_train_vote': 0.713, 'ep2_val_vote': 0.7367, 'ep2_test_vote': 0.719}
+[base] 10500/15003 images  28839 s
+[base] 11000/15003 images  29316 s
+[base] 11500/15003 images  29864 s
+[base] 12000/15003 images  30409 s
+[base] 12500/15003 images  30954 s
+[base] 13000/15003 images  31500 s
+[base] 13500/15003 images  32044 s
+[base] 14000/15003 images  32590 s
+[base] 14500/15003 images  33137 s
+[base] 15000/15003 images  33683 s
+[base] époque 3 : {'ep3_train_vote': 0.717, 'ep3_val_vote': 0.7367, 'ep3_test_vote': 0.743}
+Terminé : base

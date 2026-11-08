@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Données MNIST téléchargées et poids entraînés
+mnist_snn/data/
+probleme2/data/
+probleme2/resultats/*.npz

@@ -1,0 +1,64 @@
+[best_sans_norm] 500/15003 images  183 s
+[best_norm] 500/15003 images  191 s
+[n800] 500/5001 images  248 s
+[best_sans_norm] 1000/15003 images  436 s
+[best_norm] 1000/15003 images  440 s
+[n800] 1000/5001 images  555 s
+[best_norm] 1500/15003 images  690 s
+[best_sans_norm] 1500/15003 images  714 s
+[n800] 1500/5001 images  833 s
+[best_norm] 2000/15003 images  886 s
+[best_sans_norm] 2000/15003 images  946 s
+[n800] 2000/5001 images  1043 s
+[best_norm] 2500/15003 images  1066 s
+[best_sans_norm] 2500/15003 images  1283 s
+[best_norm] 3000/15003 images  1348 s
+[n800] 2500/5001 images  1404 s
+[best_norm] 3500/15003 images  1631 s
+[best_sans_norm] 3000/15003 images  1722 s
+[n800] 3000/5001 images  1749 s
+[best_norm] 4000/15003 images  1916 s
+[n800] 3500/5001 images  2084 s
+[best_sans_norm] 3500/15003 images  2181 s
+[best_norm] 4500/15003 images  2188 s
+[n800] 4000/5001 images  2350 s
+[best_norm] 5000/15003 images  2406 s
+[best_sans_norm] 4000/15003 images  2564 s
+[n800] 4500/5001 images  2601 s
+[n800] 5000/5001 images  2825 s
+[best_sans_norm] 4500/15003 images  2935 s
+[best_sans_norm] 5000/15003 images  3321 s
+[best_norm] époque 1 : {'ep1_train_vote': 0.8208, 'ep1_val_vote': 0.8038, 'ep1_test_vote': 0.803}
+[best_norm] 5500/15003 images  5136 s
+[best_norm] 6000/15003 images  5317 s
+[best_norm] 6500/15003 images  5524 s
+[best_norm] 7000/15003 images  5749 s
+[n800] époque 1 : {'ep1_train_vote': 0.8042, 'ep1_val_vote': 0.8148, 'ep1_test_vote': 0.806}
+Terminé : n800
+[best_norm] 7500/15003 images  5996 s
+[best_norm] 8000/15003 images  6280 s
+[best_norm] 8500/15003 images  6632 s
+[best_norm] 9000/15003 images  7009 s
+[best_norm] 9500/15003 images  7416 s
+[best_sans_norm] époque 1 : {'ep1_train_vote': 0.8536, 'ep1_val_vote': 0.8619, 'ep1_test_vote': 0.829}
+[best_sans_norm] 5500/15003 images  7666 s
+[best_norm] 10000/15003 images  7849 s
+[best_sans_norm] 6000/15003 images  7921 s
+[best_sans_norm] 6500/15003 images  8217 s
+[best_sans_norm] 7000/15003 images  8562 s
+[best_sans_norm] 7500/15003 images  8923 s
+[best_sans_norm] 8000/15003 images  9300 s
+[best_sans_norm] 8500/15003 images  9693 s
+[best_sans_norm] 9000/15003 images  10114 s
+[best_sans_norm] 9500/15003 images  10528 s
+[best_sans_norm] 10000/15003 images  10945 s
+[best_norm] époque 2 : {'ep2_train_vote': 0.8286, 'ep2_val_vote': 0.8028, 'ep2_test_vote': 0.819}
+[best_norm] 10500/15003 images  11368 s
+[best_norm] 11000/15003 images  11561 s
+[best_norm] 11500/15003 images  11859 s
+[best_norm] 12000/15003 images  12171 s
+[best_norm] 12500/15003 images  12456 s
+[best_norm] 13000/15003 images  12784 s
+[best_norm] 13500/15003 images  13150 s
+[best_norm] 14000/15003 images  14132 s
+[best_norm] 14500/15003 images  14570 s
