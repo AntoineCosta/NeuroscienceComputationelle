@@ -12,6 +12,7 @@ on trace autant de figures qu'on veut sans réentraîner.
 | `diehl_cook.py` | II | Réseau de Diehl & Cook : entrée Poisson, couches E/I, STDP éq. (3), homéostasie, normalisation, lectures |
 | `experiences.py` | III | Grille d'expériences lancée en parallèle, écrit `resultats/resultats.csv` |
 | `figures.py` | III-IV | Précisions, champs récepteurs, évolution, courbes d'accord, cartes d'activation |
+| `duree.py` | III | Chronomètre une configuration seule sur 300 images, écrit `resultats/durees.csv` |
 
 ## Installation
 
@@ -26,8 +27,9 @@ surcoût Python de chaque pas de temps, pas par les calculs eux-mêmes.
 
 ```bash
 python partie1_stdp.py     # ~3 min  -> resultats/partie1/
-python experiences.py      # ~7 h sur 12 cœurs (une expérience par processus, limité par base) -> resultats/
+python experiences.py      # ~7 h sur 12 cœurs (une expérience par processus) -> resultats/
 python figures.py          # -> resultats/figures/
+python duree.py best_sans_norm   # ~3 min, machine au repos -> resultats/durees.csv
 ```
 
 Toutes les graines aléatoires sont fixées (`seed=0`). Une seule expérience se relance avec
@@ -56,7 +58,8 @@ Toutes les graines aléatoires sont fixées (`seed=0`). Une seule expérience se
   `meilleur` (code à trous), `vote` (Diehl & Cook) et `pondere`.
 - **Données** : 7000 images tirées au hasard parmi les 70 000, découpées de façon stratifiée en
   5000 entraînement / 1000 validation / 1000 test. L'étiquetage des neurones utilise
-  1000 images d'entraînement présentées sans plasticité.
+  1000 images d'entraînement présentées sans plasticité (5000 pour les expériences `best_*` et
+  `n800`).
 
 ## Paramètres du réseau (Partie II)
 
@@ -119,15 +122,43 @@ L'homéostasie ne peut donc rien faire, et il faudrait plus d'entrées ou un gma
 - **Normalisation** : sans elle, la précision est *meilleure* après 1 époque. La règle (3) se
   régule déjà en partie toute seule : le terme −x_tar déprime les entrées inactives. La somme des
   poids chute de 118 à 26, puis remonte vers 58. Chaque neurone apprend alors un exemplaire très
-  net (`champs_sans_norm.png`) plutôt qu'une moyenne floue. La stabilité sur plusieurs époques n'a
-  pas été vérifiée.
+  net (`champs_sans_norm.png`) plutôt qu'une moyenne floue. Ça reste stable sur 3 époques à
+  400 neurones (voir ci-dessous).
 - **Lectures** : `pondere` > `vote` partout, et `meilleur` (celle du code à trous) est la pire.
-  `meilleur` attribue chaque image à la classe d'un seul neurone, le plus actif. Elle profite d'une
-  inhibition faible (plusieurs neurones répondent) et souffre quand il y a beaucoup de neurones
-  (chaque neurone, vu sur peu d'images, a une étiquette bruitée).
-- **Durées** : ce sont des temps réels sous charge variable (12 processus en parallèle, priorité
-  abaissée une partie du temps). Elles ne sont pas comparables entre expériences. La colonne
-  `pause_s` indique la suspension manuelle de 3 h déjà retirée des durées.
+  `meilleur` ne garde qu'un neurone représentant par classe (celui qui y répond le plus) et jette
+  tous les autres. Avec le winner-take-all, seuls 1 à 3 neurones déchargent par image, et ce n'est
+  souvent pas le représentant. Elle profite donc d'une inhibition faible (plus de neurones actifs)
+  et souffre quand il y a beaucoup de neurones.
+- **Durées** : celles de `resultats.csv` sont des temps réels sous charge variable (jusqu'à
+  12 processus en parallèle, priorité abaissée une partie du temps), donc non comparables entre
+  expériences. La colonne `pause_s` indique la suspension manuelle de 3 h déjà retirée. Les durées
+  fiables sont mesurées seules avec `duree.py` (voir ci-dessous).
+
+### Meilleure configuration (`best_*`, `n800`)
+
+En combinant les leviers favorables trouvés ci-dessus (plus de neurones, plusieurs époques,
+étiquetage sur 5000 images), avec et sans normalisation. Le choix se fait sur la **validation**,
+le test ne sert qu'à mesurer la généralisation (lecture pondere).
+
+| Expérience | Neurones | Époque | Validation | Test |
+|---|---|---|---|---|
+| n800 | 800 | 1 | 84.4 % | 84.4 % |
+| best_norm | 400 | 1 / 2 / 3 | 82.8 / 83.1 / 82.7 % | 82.8 / 83.6 / 83.6 % |
+| **best_sans_norm** | 400 | **1** / 2 / 3 | **87.7** / 87.3 / 86.5 % | **85.9** / 87.4 / 85.4 % |
+
+- **Configuration retenue** : 400 neurones sans normalisation, 1 époque. Elle donne **87.7 %** en
+  validation et **85.9 % en test**, contre 73.2 % pour `base`.
+- **Normalisation** : sans normalisation, on gagne environ 5 points à 400 neurones aussi, et c'est
+  stable sur 3 époques (pas d'emballement des poids).
+- **Époques** : à 400 neurones, les époques supplémentaires n'aident plus en validation.
+- **Étiquetage** : étiqueter les neurones avec 5000 images au lieu de 1000 supprime l'écart
+  train/validation de `n400` (85 % contre 76 % en vote). Cet écart venait d'étiquettes bruitées,
+  pas d'un surapprentissage.
+
+**Durée mesurée seule** (`duree.py`, 300 images, `resultats/durees.csv`) : 0.28 s par image en
+apprentissage comme en évaluation, à 400 neurones. La configuration retenue (5000 images
+d'apprentissage et 7000 d'évaluation) prend donc environ **56 min**, et 2 h 50 sur 3 époques.
+C'est environ 2.3 fois moins que le temps observé en parallèle.
 
 ### Partie IV (`resultats/figures/`)
 

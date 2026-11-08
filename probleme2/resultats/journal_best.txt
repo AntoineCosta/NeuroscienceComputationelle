@@ -62,3 +62,20 @@ Terminé : n800
 [best_norm] 13500/15003 images  13150 s
 [best_norm] 14000/15003 images  14132 s
 [best_norm] 14500/15003 images  14570 s
+[best_norm] 15000/15003 images  15245 s
+[best_sans_norm] époque 2 : {'ep2_train_vote': 0.8576, 'ep2_val_vote': 0.8569, 'ep2_test_vote': 0.855}
+[best_sans_norm] 10500/15003 images  16220 s
+[best_sans_norm] 11000/15003 images  16423 s
+[best_sans_norm] 11500/15003 images  16656 s
+[best_sans_norm] 12000/15003 images  16915 s
+[best_sans_norm] 12500/15003 images  17282 s
+[best_sans_norm] 13000/15003 images  17747 s
+[best_sans_norm] 13500/15003 images  18241 s
+[best_sans_norm] 14000/15003 images  18756 s
+[best_norm] époque 3 : {'ep3_train_vote': 0.8382, 'ep3_val_vote': 0.8158, 'ep3_test_vote': 0.826}
+Terminé : best_norm
+[best_sans_norm] 14500/15003 images  19288 s
+[best_sans_norm] 15000/15003 images  19745 s
+[best_sans_norm] époque 3 : {'ep3_train_vote': 0.8554, 'ep3_val_vote': 0.8569, 'ep3_test_vote': 0.836}
+Terminé : best_sans_norm
+code de sortie python : 0

@@ -1,0 +1,2 @@
+nom,n_neurones,epoques,s_par_image_apprentissage,s_par_image_evaluation,duree_totale_estimee_h,images_mesurees
+best_sans_norm,400,3,0.281,0.282,2.81,300
