@@ -1,6 +1,7 @@
 """
 Partie III - Expériences MNIST. Chaque expérience = la configuration par défaut de
-diehl_cook.DEFAUT modifiée sur un seul paramètre. Les expériences tournent en
+diehl_cook.DEFAUT modifiée sur un seul paramètre (sauf best_* et n800, qui combinent
+les leviers favorables). Les expériences tournent en
 parallèle (un processus par expérience) ; chaque ligne de résultats est ajoutée à
 resultats/resultats.csv et les données brutes vont dans resultats/<nom>.npz.
 
@@ -50,7 +51,7 @@ if __name__ == '__main__':
     noms = sys.argv[1:] or list(EXPERIENCES)
     os.makedirs(DOSSIER_RES, exist_ok=True)
     fichier = os.path.join(DOSSIER_RES, 'resultats.csv')
-    with Pool(min(len(noms), os.cpu_count() - 1)) as pool:
+    with Pool(max(1, min(len(noms), os.cpu_count() - 1))) as pool:
         for ligne in pool.imap_unordered(lancer, noms):
             if ligne is None:
                 continue

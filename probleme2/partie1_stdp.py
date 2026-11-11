@@ -32,6 +32,7 @@ SORTIE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resultats', '
 N, GMAX, DUREE = 1000, 0.01, 200 * second
 R_CIBLE, GAMMA = 10, 0.1     # STDP robuste : taux post visé (Hz) et vitesse de l'homéostasie
 FREQUENCES = (6, 10, 15)
+COULEURS = {6: 'tab:blue', 10: 'tab:orange', 15: 'tab:green'}
 FORMES = {   # amplitudes (fraction de gmax) et constantes de temps (ms)
     # a) excitateur -> excitateur
     'I_EE':  dict(A1=+0.010, t1=20, A2=0.0,    t2=1,   A3=-0.0105, t3=20),  # hebbien classique (Song)
@@ -139,18 +140,24 @@ def figures(res):
         fig, axes = plt.subplots(3, 4, figsize=(15, 9))
         for k, nom in enumerate(FORMES):
             for r in (r for r in sel if r['forme'] == nom):
+                # 6 Hz en trait épais : visible même quand 10 Hz donne exactement la même courbe
+                st = dict(color=COULEURS[r['freq']], lw=3 if r['freq'] == 6 else 1.3)
+                muet = ' (muet)' if r['taux'].sum() == 0 else ''
                 axes[0, k].hist(r['w'][:, -1], bins=40, range=(0, 1), histtype='step',
-                                label=f"{r['freq']} Hz")
-                axes[1, k].plot(r['w'].mean(0))
-                axes[1, k].plot(r['w'].std(0), ls=':', c=axes[1, k].lines[-1].get_color())
-                axes[2, k].plot(r['taux'])
+                                label=f"{r['freq']} Hz{muet}", **st)
+                axes[1, k].plot(r['w'].mean(0), **st)
+                axes[1, k].plot(r['w'].std(0), ls=':', **st)
+                lisse = np.convolve(r['taux'], np.ones(10) / 10, mode='valid')   # moyenne sur 10 s
+                axes[2, k].plot(np.arange(10, 10 + len(lisse)), lisse, **st)
             axes[0, k].set(title=nom, xlabel='w final / gmax')
+            axes[0, k].legend(fontsize=8)
             axes[1, k].set(ylim=(0, 1))
-            axes[2, k].set(xlabel='temps (s)', yscale='symlog')
+            axes[2, k].set(xlabel='temps (s)', ylim=(0, None))
+            if robuste:
+                axes[2, k].axhline(R_CIBLE, c='grey', ls='--', lw=1)
         axes[0, 0].set_ylabel('nb de synapses')
         axes[1, 0].set_ylabel('w / gmax : moyenne (—), écart-type (···)')
-        axes[2, 0].set_ylabel('taux post (Hz)')
-        axes[0, 0].legend()
+        axes[2, 0].set_ylabel('taux post (Hz, moyenne sur 10 s)')
         fig.suptitle('STDP ' + ('robuste (homéostasie + traces saturantes)' if robuste else 'standard'))
         fig.tight_layout()
         fig.savefig(os.path.join(SORTIE, f"poids_{'robuste' if robuste else 'standard'}.png"), dpi=120)
@@ -162,7 +169,7 @@ def _job(args):
 
 if __name__ == '__main__':
     jobs = [(f, fr, rob) for rob in (False, True) for f in FORMES for fr in FREQUENCES]
-    with Pool(min(len(jobs), os.cpu_count() - 2)) as pool:
+    with Pool(max(1, min(len(jobs), os.cpu_count() - 2))) as pool:
         res = pool.map(_job, jobs)
     figures(res)
     import csv

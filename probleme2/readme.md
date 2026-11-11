@@ -11,7 +11,7 @@ on trace autant de figures qu'on veut sans réentraîner.
 | `partie1_stdp.py` | I | Les 4 formes de STDP (Caporale & Dan) sur le réseau de Song et al. (2000), à 6, 10 et 15 Hz, en version standard et robuste |
 | `diehl_cook.py` | II | Réseau de Diehl & Cook : entrée Poisson, couches E/I, STDP éq. (3), homéostasie, normalisation, lectures |
 | `experiences.py` | III | Grille d'expériences lancée en parallèle, écrit `resultats/resultats.csv` |
-| `figures.py` | III-IV | Précisions, champs récepteurs, évolution, courbes d'accord, cartes d'activation |
+| `figures.py` | III-IV | Précisions, champs récepteurs, évolution, courbes d'accord, activité des neurones |
 | `duree.py` | III | Chronomètre une configuration seule sur 300 images, écrit `resultats/durees.csv` |
 
 ## Installation
@@ -34,6 +34,13 @@ python duree.py best_sans_norm   # ~3 min, machine au repos -> resultats/durees.
 
 Toutes les graines aléatoires sont fixées (`seed=0`). Une seule expérience se relance avec
 `python experiences.py base`.
+
+Meilleur modèle seul (400 neurones, sans normalisation ; le modèle retenu est l'époque 1) :
+
+```bash
+python experiences.py best_sans_norm   # ~2 h 50 (3 époques, évaluées après chacune) -> resultats/
+python figures.py best_sans_norm       # ses figures -> resultats/figures/
+```
 
 ## Choix d'implémentation
 
@@ -172,6 +179,9 @@ C'est environ 2.3 fois moins que le temps observé en parallèle.
   classe. Les neurones du « 1 » répondent un peu aux 8 et aux 2, qui partagent un trait vertical.
   Sur le test (base, 3 époques), les erreurs les plus fréquentes sont visuellement logiques :
   9→4 (34), 4→9 (19), 2→1 (18), 8→1 (16), 8→3 (15) et 5→3 (14).
-- **Cartes d'activation** (`activation_*.png`) : l'activité est très éparse, avec 1 à 3 neurones
-  actifs par fenêtre de temps à cause de l'inhibition latérale (winner-take-all). Il faut parfois
-  une 2e présentation plus intense de l'image avant que le réseau réponde.
+- **Activité** (`activation_*.png`, 3 images de validation : réussite nette, de justesse, échec) :
+  une ligne par neurone qui a déchargé, avec son champ récepteur. L'activité est très éparse :
+  4 ou 5 neurones sur 400 par image, à cause de l'inhibition latérale (winner-take-all). Les
+  neurones actifs sont ceux dont le prototype ressemble à l'image, quelle que soit leur classe :
+  pour l'image 63 (un 3), les neurones « 5 » et « 8 » l'emportent sur l'unique neurone « 3 »
+  (prédit 8). Il faut parfois une 2e présentation plus intense avant que le réseau réponde.

@@ -11,8 +11,8 @@ Architecture :  784 entrées Poisson --(STDP)--> N excitateurs <--> N inhibiteur
                 xpre = trace présynaptique (mise à 1 à chaque décharge pré, décroît
                 avec tau_pre). Si l'entrée a déchargé récemment (xpre > x_tar) le
                 poids augmente, sinon il diminue -> le neurone "copie" l'image.
-  - Normalisation divisive (Goodhill & Barrow) : après chaque image, la somme des
-    poids entrant dans chaque neurone est ramenée à 0.1 x (nb d'entrées) (=78).
+  - Normalisation divisive (Goodhill & Barrow, optionnelle) : avant chaque présentation,
+    la somme des poids entrant dans chaque neurone est ramenée à 0.1 x (nb d'entrées) (=78).
 
 Lecture (hors ligne, sur les décomptes de décharges enregistrés) : voir `lecture`.
 
@@ -46,7 +46,7 @@ DEFAUT = dict(
     p_ie=1.0,            # proba de connexion inhibiteur i -> excitateur j (j != i)
     eta=0.01, x_tar=0.4, w_max=1.0, mu=1.0, tau_pre=20.0,   # STDP éq. (3) (tau en ms)
     theta_plus=0.2,      # mV ajoutés au seuil à chaque décharge (si homeo) ; article : 0.05,
-                         # trop lent pour 5000 images (la moitié des neurones restent muets)
+                         # trop lent pour 5000 images (-3 points, expérience theta_0.05)
     t_image=350.0,       # ms de présentation d'une image
     seed=0,
 )
@@ -223,7 +223,7 @@ def experience(nom, **modifs):
             it += 1
             if it % 500 == 0:
                 print(f'[{nom}] {it}/{n_tot} images  {time.time() - t0:.0f} s', flush=True)
-        ligne[f'duree_entrainement_s'] = round(time.time() - t0)
+        ligne['duree_entrainement_s'] = round(time.time() - t0)
         # Évaluation sans plasticité : étiquetage sur une partie du train, puis val/test
         Xet, yet = Xtr[:cfg['n_eval_train']], ytr[:cfg['n_eval_train']]
         C = {'train': r.compter(Xet), 'val': r.compter(Xva), 'test': r.compter(Xte)}
